@@ -1,0 +1,36 @@
+on_actions = {
+	on_startup = {
+		# Variables
+		effect = {
+			current_year << 2026
+			current_year++
+			current_year--
+			
+			# Temporary variable names begin with an underscore
+			_century << 50
+			_century *= 4
+			_century /= 2
+			
+			current_year += _century
+			current_year -= 100
+		}
+		
+		# If Statement
+		effect = {
+			if (current_year > 2025) {
+				log = "Value of current_year: [?current_year]"
+			}
+		}
+		
+		# Boolean Operators
+		effect = {
+			if (current_year >= 1939 && current_year < 1945 || current_year == 1945) {
+				log = "World War II is still going on"
+			}
+			
+			if (!is_historical_focus_on) {
+				log = "Historical Focus disabled"
+			}
+		}
+	}
+}

@@ -1,0 +1,58 @@
+start: item*
+
+?item: if_statement
+	 | var_check
+	 | inc_dec
+	 | assignment
+	 | short_assign
+	 | math_assign
+	 | value
+
+if_statement: "if" "(" condition ")" block -> modern_if
+			| "if" EQUAL block             -> vanilla_if
+
+condition: conj_element (OR_OP conj_element)*
+?conj_element: not_element (AND_OP not_element)*
+?not_element: NOT_OP cond_atom -> logical_not
+            | cond_atom
+?cond_atom: var_check | assignment | value
+
+assignment: value operator value
+
+short_assign: value SHORT_ASSIGN value
+
+math_assign: value MATH_OPERATOR value
+
+var_check: value COMP_OPERATOR value
+
+inc_dec: value INC_DEC_OP
+
+block: "{" item* "}"
+
+?value: UNQUOTED_VALUE -> unquoted_value
+	  | ESCAPED_STRING -> escaped_string
+	  | block
+
+operator: EQUAL
+		| COMP_OPERATOR_VANILLA
+
+EQUAL: "="
+COMP_OPERATOR: "==" | "!=" | ">" | "<" | ">=" | "<="
+COMP_OPERATOR_VANILLA: ">" | "<" | ">=" | "<="
+
+INC_DEC_OP.2: "++" | "--"
+NOT_OP: "!"
+AND_OP: "&&"
+OR_OP: "||"
+
+SHORT_ASSIGN.2: "<<"
+MATH_OPERATOR.2: "+=" | "-=" | "*=" | "/="
+
+UNQUOTED_VALUE: /[a-zA-Z0-9_\.\@\:]+(?:\-[a-zA-Z0-9_\.\@\:]+)*/
+
+COMMENT: /#[^\n]*/
+%ignore COMMENT
+
+%import common.ESCAPED_STRING
+%import common.WS
+%ignore WS
