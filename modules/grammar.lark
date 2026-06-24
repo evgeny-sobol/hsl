@@ -1,23 +1,47 @@
 start: item*
 
-?item: if_statement
+?item: macro_def
+	 | macro_call
+	 | if_statement
+	 | elif_statement
 	 | var_check
+	#| array_check
 	 | inc_dec
 	 | assignment
+	 | array_method
+     | array_assign
 	 | short_assign
 	 | math_assign
+	 | print_statement
 	 | value
+	 | comment
 
-if_statement: "if" "(" condition ")" block -> modern_if
-			| "if" EQUAL block             -> vanilla_if
+# Update macro definition and call rules to accept optional parameters
+macro_def: "macro" UNQUOTED_VALUE "(" macro_params? ")" block
+macro_call: UNQUOTED_VALUE "(" macro_args? ")"
+# Add rules for comma-separated lists
+# Lark automatically drops literal commas (",") because they are anonymous terminals
+macro_params: UNQUOTED_VALUE ("," UNQUOTED_VALUE)*
+macro_args: value ("," value)*
+
+if_statement: "if" "(" condition ")" "=" block -> modern_if
+			| "if" EQUAL block                 -> vanilla_if
+elif_statement: "elif" "(" condition ")" "=" block
 
 condition: conj_element (OR_OP conj_element)*
 ?conj_element: not_element (AND_OP not_element)*
 ?not_element: NOT_OP cond_atom -> logical_not
             | cond_atom
-?cond_atom: var_check | assignment | value
+?cond_atom: var_check
+          | array_check
+		  | array_not_check
+          | assignment
+		  | value
 
 assignment: value operator value
+
+array_method: UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
+array_assign: UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
 
 short_assign: value SHORT_ASSIGN value
 
@@ -25,13 +49,22 @@ math_assign: value MATH_OPERATOR value
 
 var_check: value COMP_OPERATOR value
 
+array_check: value "in" UNQUOTED_VALUE "[]"
+array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
+
 inc_dec: value INC_DEC_OP
 
 block: "{" item* "}"
+print_statement: "print" "(" value ")"
+comment: COMMENT
 
-?value: UNQUOTED_VALUE -> unquoted_value
-	  | ESCAPED_STRING -> escaped_string
+?value: array_length
+	  | array_access
+	  | UNQUOTED_VALUE -> unquoted_value
+	  | string
 	  | block
+
+string: ESCAPED_STRING
 
 operator: EQUAL
 		| COMP_OPERATOR_VANILLA
@@ -41,9 +74,12 @@ COMP_OPERATOR: "==" | "!=" | ">" | "<" | ">=" | "<="
 COMP_OPERATOR_VANILLA: ">" | "<" | ">=" | "<="
 
 INC_DEC_OP.2: "++" | "--"
-NOT_OP: "!"
-AND_OP: "&&"
-OR_OP: "||"
+NOT_OP: "not"
+AND_OP: "and"
+OR_OP: "or"
+
+array_length: UNQUOTED_VALUE "[].length()"
+array_access: UNQUOTED_VALUE "[" value "]"
 
 SHORT_ASSIGN.2: "<<"
 MATH_OPERATOR.2: "+=" | "-=" | "*=" | "/="
@@ -51,7 +87,6 @@ MATH_OPERATOR.2: "+=" | "-=" | "*=" | "/="
 UNQUOTED_VALUE: /[a-zA-Z0-9_\.\@\:]+(?:\-[a-zA-Z0-9_\.\@\:]+)*/
 
 COMMENT: /#[^\n]*/
-%ignore COMMENT
 
 %import common.ESCAPED_STRING
 %import common.WS

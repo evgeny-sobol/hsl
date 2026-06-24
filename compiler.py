@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from lark import Lark
 from modules.transformer import HslTransformer
@@ -17,18 +18,46 @@ def generate_hoi4_code(ast, indent_level=0):
 
     if isinstance(ast, tuple):
         node_type = ast[0]
-
+        
+        # Check if the node is a comment
+        if node_type == "COMMENT":
+            comment_text = ast[1]
+            
+            # Check for our hidden empty line marker
+            if comment_text == "#___EMPTY_LINE___":
+                return "\n" # Print an empty line without tabs
+            
+            # Output the comment exactly as it is, with proper indentation
+            return f"{spacing}{comment_text}\n"
+        
         if node_type == "ASSIGN":
             _, left, op, right = ast
 
+            # Check if the right side is a BLOCK
             if isinstance(right, tuple) and right[0] == "BLOCK":
-                block_content = generate_hoi4_code(right[1], indent_level + 1)
+                block_items = right[1]
+                
+                # If the block has exactly ONE item, and it's a simple ASSIGN tuple
+                if len(block_items) == 1 and isinstance(block_items[0], tuple) and block_items[0][0] == "ASSIGN":
+                    inner_left = block_items[0][1]
+                    inner_op = block_items[0][2]
+                    inner_right = block_items[0][3]
+
+                    # Ensure the inner value is a primitive (not another nested block/tuple/list)
+                    if not isinstance(inner_right, (tuple, list)):
+                        # Format everything on a single line!
+                        return f"{spacing}{left} {op} {{ {inner_left} {inner_op} {inner_right} }}\n"
+
+                # If it's a complex block (multiple items or nested blocks), do standard multi-line
+                block_content = generate_hoi4_code(block_items, indent_level + 1)
                 return f"{spacing}{left} {op} {{\n{block_content}{spacing}}}\n"
+            
+            # --- Existing: Primitive value assignment (e.g. log = "Hello") ---
             else:
-                if isinstance(right, str):
-                    if " " in right or left in ["has_dlc", "title", "desc", "text"]:
-                        return f"{spacing}{left} {op} \"{right}\"\n"
                 return f"{spacing}{left} {op} {right}\n"
+
+    if isinstance(ast, str) or isinstance(ast, int) or isinstance(ast, float):
+        return f"{spacing}{ast}\n"
 
     return ""
 
@@ -38,16 +67,37 @@ def compile_folder(target_folder):
     its subdirectories, then compiles them into the game's .txt files.
     """
     grammar_path = "modules/grammar.lark"
-    
     if not os.path.exists(grammar_path):
         print(f"Error: Grammar file '{grammar_path}' not found in the project root!")
         return
-
     # 1. Initialize Lark
     print(f"Loading grammar from {grammar_path}...")
     parser = Lark.open(grammar_path, start='start', parser='lalr')
     transformer = HslTransformer()
-
+    
+    global_macros = {} # This dictionary will store all processed macros
+    hml_path = os.path.join(target_folder, "macros.hml")
+    
+    if os.path.exists(hml_path):
+        print(f"📖 Found macro library: {hml_path}. Loading...")
+        try:
+            with open(hml_path, "r", encoding="utf-8-sig") as f:
+                hml_code = f.read()
+            
+            # 1. Parse the HML code into an AST tree using our grammar
+            hml_tree = parser.parse(hml_code)
+            
+            # 2. Pass our global_macros dict to the transformer to fill it
+            hml_transformer = HslTransformer(external_macros=global_macros)
+            hml_transformer.transform(hml_tree)
+            
+            print(f"✅ Successfully loaded macros: {len(global_macros)}")
+        except Exception as e:
+            print(f"❌ Error while reading macro library: {e}")
+            return
+    
+    transformer.macros = global_macros
+    
     if not os.path.exists(target_folder):
         print(f"Error: The specified directory '{target_folder}' does not exist!")
         return
@@ -81,7 +131,10 @@ def compile_folder(target_folder):
             try:
                 with open(hsl_path, "r", encoding="utf-8-sig") as f:
                     source_code = f.read()
-
+                
+                # Find all empty lines and replace them with a special hidden comment
+                source_code = re.sub(r'^[ \t]*$', '#___EMPTY_LINE___', source_code, flags=re.MULTILINE)
+                
                 # Parsing, transformation, and code generation
                 tree = parser.parse(source_code)
                 ast_data = transformer.transform(tree)

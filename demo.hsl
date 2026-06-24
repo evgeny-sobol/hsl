@@ -17,20 +17,52 @@ on_actions = {
 		
 		# If Statement
 		effect = {
-			if (current_year > 2025) {
-				log = "Value of current_year: [?current_year]"
+			if (current_year > 2025) = {
+				print("Value of current_year ([?current_year]) is MORE then 2025")
+			}
+			elif (current_year < 2025) = {
+				print("Value of current_year ([?current_year]) is LESS then 2025")
+			}
+			else = {
+				print("Value of current_year ([?current_year]) is EQUAL 2025")
 			}
 		}
 		
 		# Boolean Operators
 		effect = {
-			if (current_year >= 1939 && current_year < 1945 || current_year == 1945) {
-				log = "World War II is still going on"
+			if (current_year >= 1939 and current_year < 1945 or current_year == 1945) = {
+				print("World War II is still going on")
 			}
 			
-			if (!is_historical_focus_on) {
-				log = "Historical Focus disabled"
+			if (not is_historical_focus_on) = {
+				print("Historical Focus disabled")
 			}
+		}
+		
+		# Arrays
+		effect = {
+			enemy_tags[].add(GER)
+			enemy_tags[].add(ITA)
+			enemy_tags[].remove(ITA)
+			enemy_tags[].clear()
+			
+			enemy_tags[].add(SOV)
+			enemies_count << enemy_tags[].length()
+			enemy_tags[0] << JAP
+			_temp_target << enemy_tags[0]
+			
+			if (enemies_count > 0 and _temp_target == JAP) = {
+				print("We are fighting against Imperial Japan")
+			}
+			
+			if (USA not in enemy_tags[]) = {
+				print("United States of America isn't our enemy")
+			}
+		}
+		
+		# Macros
+		effect = {
+			transfer_equipment(ENG, FRA, 500)
 		}
 	}
 }
