@@ -1,5 +1,4 @@
 macro transfer_equipment(from_tag, to_tag, amount) {
 	from_tag.equipment_stock -= amount
 	to_tag.equipment_stock += amount
-	print("Equipment successfully transferred from [?from_tag] to [?to_tag]")
 }

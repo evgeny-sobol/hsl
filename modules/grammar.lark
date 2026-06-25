@@ -1,7 +1,9 @@
 start: item*
 
-?item: macro_def
+?item: func_call
+	 | macro_def
 	 | macro_call
+	 | linq_statement
 	 | if_statement
 	 | elif_statement
 	 | var_check
@@ -18,7 +20,7 @@ start: item*
 
 # Update macro definition and call rules to accept optional parameters
 macro_def: "macro" UNQUOTED_VALUE "(" macro_params? ")" block
-macro_call: UNQUOTED_VALUE "(" macro_args? ")"
+macro_call: MACRO_NAME "(" macro_args? ")"
 # Add rules for comma-separated lists
 # Lark automatically drops literal commas (",") because they are anonymous terminals
 macro_params: UNQUOTED_VALUE ("," UNQUOTED_VALUE)*
@@ -32,13 +34,18 @@ condition: conj_element (OR_OP conj_element)*
 ?conj_element: not_element (AND_OP not_element)*
 ?not_element: NOT_OP cond_atom -> logical_not
             | cond_atom
-?cond_atom: var_check
+?cond_atom: func_call
+		  | var_check
           | array_check
 		  | array_not_check
           | assignment
 		  | value
 
 assignment: value operator value
+
+func_call: UNQUOTED_VALUE "(" [value] ")"
+
+linq_statement: UNQUOTED_VALUE "()" "." "filter" "(" condition ")" "=" block
 
 array_method: UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
 array_assign: UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
@@ -55,6 +62,7 @@ array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
 inc_dec: value INC_DEC_OP
 
 block: "{" item* "}"
+     | "{" scope_def? item* "}"
 print_statement: "print" "(" value ")"
 comment: COMMENT
 
@@ -83,6 +91,11 @@ array_access: UNQUOTED_VALUE "[" value "]"
 
 SHORT_ASSIGN.2: "<<"
 MATH_OPERATOR.2: "+=" | "-=" | "*=" | "/="
+
+MACRO_NAME.2: "@" /[a-zA-Z0-9_]+/
+SCOPE_ARROW.2: ">>"
+
+scope_def: UNQUOTED_VALUE SCOPE_ARROW
 
 UNQUOTED_VALUE: /[a-zA-Z0-9_\.\@\:]+(?:\-[a-zA-Z0-9_\.\@\:]+)*/
 

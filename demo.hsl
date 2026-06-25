@@ -1,68 +1,83 @@
-on_actions = {
-	on_startup = {
-		# Variables
-		effect = {
-			current_year << 2026
-			current_year++
-			current_year--
-			
-			# Temporary variable names begin with an underscore
-			_century << 50
-			_century *= 4
-			_century /= 2
-			
-			current_year += _century
-			current_year -= 100
-		}
-		
-		# If Statement
-		effect = {
-			if (current_year > 2025) = {
-				print("Value of current_year ([?current_year]) is MORE then 2025")
+# Variables
+effect = {
+	current_year << 2026
+	current_year++
+	current_year--
+
+	# Temporary variable names begin with an underscore
+	_century << 50
+	_century *= 4
+	_century /= 2
+
+	current_year += _century
+	current_year -= 100
+}
+
+# If Statement
+effect = {
+	if (current_year > 2025) = {
+		print("Value of current_year ([?current_year]) is MORE then 2025")
+	}
+	elif (current_year < 2025) = {
+		print("Value of current_year ([?current_year]) is LESS then 2025")
+	}
+	else = {
+		print("Value of current_year ([?current_year]) is EQUAL 2025")
+	}
+}
+
+# Boolean Operators
+effect = {
+	if (current_year >= 1939 and current_year < 1945 or current_year == 1945) = {
+		print("World War II is still going on")
+	}
+	
+	if (not is_historical_focus_on()) = {
+		print("Historical Focus disabled")
+	}
+}
+
+# Arrays
+effect = {
+	enemy_tags[].add(GER)
+	enemy_tags[].add(ITA)
+	enemy_tags[].remove(ITA)
+	enemy_tags[].clear()
+	
+	enemy_tags[].add(SOV)
+	enemies_count << enemy_tags[].length()
+	enemy_tags[0] << JAP
+	_temp_target << enemy_tags[0]
+	
+	if (enemies_count > 0 and _temp_target == JAP) = {
+		print("We are fighting against Imperial Japan")
+	}
+	
+	if (USA not in enemy_tags[]) = {
+		print("United States of America isn't our enemy")
+	}
+}
+
+# Calling Standard Functions
+effect = {
+	if (is_major() and has_same_ideology("democracy")) = {
+		print("Major power with democracy!")
+	}
+}
+
+# Calling Macros
+effect = {
+	@transfer_equipment(ENG, FRA, 500)
+}
+
+# LINQ-style filters
+effect = {
+	every_country().filter(is_major(false)) = { target_country >>
+		# For target minor country,
+		#   let's choose random major rival with different ideology.
+		random_other_country().
+			filter(is_major() and has_same_ideology(false)) = { random_country >>
+				target_country.rivals[].add(random_country)
 			}
-			elif (current_year < 2025) = {
-				print("Value of current_year ([?current_year]) is LESS then 2025")
-			}
-			else = {
-				print("Value of current_year ([?current_year]) is EQUAL 2025")
-			}
-		}
-		
-		# Boolean Operators
-		effect = {
-			if (current_year >= 1939 and current_year < 1945 or current_year == 1945) = {
-				print("World War II is still going on")
-			}
-			
-			if (not is_historical_focus_on) = {
-				print("Historical Focus disabled")
-			}
-		}
-		
-		# Arrays
-		effect = {
-			enemy_tags[].add(GER)
-			enemy_tags[].add(ITA)
-			enemy_tags[].remove(ITA)
-			enemy_tags[].clear()
-			
-			enemy_tags[].add(SOV)
-			enemies_count << enemy_tags[].length()
-			enemy_tags[0] << JAP
-			_temp_target << enemy_tags[0]
-			
-			if (enemies_count > 0 and _temp_target == JAP) = {
-				print("We are fighting against Imperial Japan")
-			}
-			
-			if (USA not in enemy_tags[]) = {
-				print("United States of America isn't our enemy")
-			}
-		}
-		
-		# Macros
-		effect = {
-			transfer_equipment(ENG, FRA, 500)
-		}
 	}
 }
