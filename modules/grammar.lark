@@ -1,51 +1,51 @@
-start: item*
+start: (_NEWLINE | item)*
 
-?item: func_call
-	 | macro_def
-	 | macro_call
-	 | linq_statement
-	 | if_statement
-	 | elif_statement
-	 | var_check
-	#| array_check
-	 | inc_dec
-	 | assignment
-	 | array_method
-     | array_assign
-	 | short_assign
-	 | math_assign
-	 | print_statement
-	 | value
-	 | comment
+?item: if_statement
+     | elif_statement
+     | else_statement
+     | linq_statement
+     | macro_def
+     | macro_call _NEWLINE
+     | func_call _NEWLINE
+     | assignment _NEWLINE
+     | array_method _NEWLINE
+     | array_assign _NEWLINE
+     | short_assign _NEWLINE
+     | math_assign _NEWLINE
+     | inc_dec _NEWLINE
+     | var_check _NEWLINE
+     | print_statement _NEWLINE
+     | comment _NEWLINE
+     | generic_block
 
 # Update macro definition and call rules to accept optional parameters
-macro_def: "macro" UNQUOTED_VALUE "(" macro_params? ")" block
+macro_def: "macro" UNQUOTED_VALUE "(" macro_params? ")" block _NEWLINE?
 macro_call: MACRO_NAME "(" macro_args? ")"
 # Add rules for comma-separated lists
 # Lark automatically drops literal commas (",") because they are anonymous terminals
 macro_params: UNQUOTED_VALUE ("," UNQUOTED_VALUE)*
 macro_args: value ("," value)*
 
-if_statement: "if" "(" condition ")" "=" block -> modern_if
-			| "if" EQUAL block                 -> vanilla_if
-elif_statement: "elif" "(" condition ")" "=" block
+if_statement: "if" ( "(" condition ")" | condition ) block
+elif_statement: "elif" ( "(" condition ")" | condition ) block
+else_statement: "else" block
 
 condition: conj_element (OR_OP conj_element)*
 ?conj_element: not_element (AND_OP not_element)*
 ?not_element: NOT_OP cond_atom -> logical_not
             | cond_atom
 ?cond_atom: func_call
-		  | var_check
+          | var_check
           | array_check
-		  | array_not_check
+          | array_not_check
           | assignment
-		  | value
+          | value
 
 assignment: value operator value
 
 func_call: UNQUOTED_VALUE "(" [value] ")"
 
-linq_statement: UNQUOTED_VALUE "()" "." "filter" "(" condition ")" "=" block
+linq_statement.2: UNQUOTED_VALUE "()" _NEWLINE* "." _NEWLINE* "which" "(" condition ")" scope_def? block
 
 array_method: UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
 array_assign: UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
@@ -61,21 +61,20 @@ array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
 
 inc_dec: value INC_DEC_OP
 
-block: "{" item* "}"
-     | "{" scope_def? item* "}"
+block: ":" scope_def? comment? _NEWLINE _INDENT (_NEWLINE | item)* _DEDENT
 print_statement: "print" "(" value ")"
 comment: COMMENT
+generic_block: UNQUOTED_VALUE "()"? block
 
-?value: array_length
-	  | array_access
-	  | UNQUOTED_VALUE -> unquoted_value
-	  | string
-	  | block
+?value: array_size
+      | array_access
+      | UNQUOTED_VALUE -> unquoted_value
+      | string
 
 string: ESCAPED_STRING
 
 operator: EQUAL
-		| COMP_OPERATOR_VANILLA
+        | COMP_OPERATOR_VANILLA
 
 EQUAL: "="
 COMP_OPERATOR: "==" | "!=" | ">" | "<" | ">=" | "<="
@@ -86,21 +85,38 @@ NOT_OP: "not"
 AND_OP: "and"
 OR_OP: "or"
 
-array_length: UNQUOTED_VALUE "[].length()"
+array_size: UNQUOTED_VALUE "[].size()"
 array_access: UNQUOTED_VALUE "[" value "]"
 
-SHORT_ASSIGN.2: "<<"
+SHORT_ASSIGN.2: "<-"
 MATH_OPERATOR.2: "+=" | "-=" | "*=" | "/="
 
 MACRO_NAME.2: "@" /[a-zA-Z0-9_]+/
-SCOPE_ARROW.2: ">>"
+SCOPE_ARROW.2: "->"
 
-scope_def: UNQUOTED_VALUE SCOPE_ARROW
+scope_def: SCOPE_ARROW UNQUOTED_VALUE
 
-UNQUOTED_VALUE: /[a-zA-Z0-9_\.\@\:]+(?:\-[a-zA-Z0-9_\.\@\:]+)*/
+# Allow digits with optional single underscores between them
+UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.]+/
 
 COMMENT: /#[^\n]*/
 
 %import common.ESCAPED_STRING
 %import common.WS
-%ignore WS
+
+# Declare indentation tokens for HslIndenter
+%declare _INDENT _DEDENT
+
+# Newlines are now significant (they consume trailing whitespace and blank lines)
+_NEWLINE: ( /\r?\n[\t ]*/ )+
+
+# Ignore spaces and tabs only WITHIN a line
+%ignore /[\t ]+/
+
+# Explicitly name brackets with a leading underscore.
+# Thanks to '_', Lark will hide them from the AST,
+#   and transformer.py will continue to receive clean data as if nothing had changed
+_LPAR: "("
+_RPAR: ")"
+_LSQB: "["
+_RSQB: "]"

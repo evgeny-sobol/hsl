@@ -2,7 +2,42 @@ import os
 import re
 import sys
 from lark import Lark
+from lark.indenter import Indenter
 from modules.transformer import HslTransformer
+
+class HslIndenter(Indenter):
+    NL_type = '_NEWLINE'
+    OPEN_PAREN_types = ['_LPAR', '_LSQB']
+    CLOSE_PAREN_types = ['_RPAR', '_RSQB']
+    INDENT_type = '_INDENT'
+    DEDENT_type = '_DEDENT'
+    tab_len = 2
+
+def preserve_empty_lines(source_code):
+    """
+    Finds all empty lines and inserts a hidden comment into each one,
+    copying the indentation level from the next non-empty line.
+    This prevents HslIndenter from breaking the block structure.
+    """
+    lines = source_code.splitlines()
+    for i in range(len(lines)):
+        if lines[i].strip() == '':
+            indent = ""
+            for j in range(i + 1, len(lines)):
+                if lines[j].strip() != '':
+                    match = re.match(r'^[ \t]*', lines[j])
+                    if match:
+                        indent = match.group(0)
+                    break
+            lines[i] = indent + '#___EMPTY_LINE___'
+
+    # Two empty lines at zero indentation at the end:
+    # the first gives HslIndenter a trigger to emit _DEDENT,
+    # the second gives the parser a _NEWLINE token after _DEDENT
+    lines.append('')
+    lines.append('')
+
+    return '\n'.join(lines)
 
 def resolve_scopes(text, scope_stack):
     if not isinstance(text, str) or not scope_stack:
@@ -13,10 +48,10 @@ def resolve_scopes(text, scope_stack):
     # Index 1 = second to last item (PREV), and so on
     for index, var_name in enumerate(reversed(scope_stack)):
         pointer = "THIS" if index == 0 else ".".join(["PREV"] * index)
-        
+
         # Match whole words only (\b) to avoid breaking partial matches (e.g., "c" inside "add_power")
         text = re.sub(rf'\b{re.escape(var_name)}\b', pointer, text)
-        
+
     return text
 
 def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
@@ -25,7 +60,7 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
     """
     if scope_stack is None:
         scope_stack = []
-    
+
     strings = []
     spacing = "\t" * indent_level
 
@@ -36,18 +71,18 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
 
     if isinstance(ast, tuple):
         node_type = ast[0]
-        
+
         # Check if the node is a comment
         if node_type == "COMMENT":
             comment_text = ast[1]
-            
+
             # Check for our hidden empty line marker
             if comment_text == "#___EMPTY_LINE___":
                 return "\n" # Print an empty line without tabs
-            
+
             # Output the comment exactly as it is, with proper indentation
             return f"{spacing}{comment_text}\n"
-        
+
         if node_type == "ASSIGN":
             _, left, op, right = ast
 
@@ -57,14 +92,14 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
             # Check if the right side is a BLOCK
             if isinstance(right, tuple) and right[0] == "BLOCK":
                 block_items = right[1]
-                
+
                 # EXTRACT THE CONTEXT NAME (if present, e.g., "this_country")
                 scope_var = right[2] if len(right) > 2 else None
 
                 # PUSH THE VARIABLE ONTO THE STACK BEFORE GENERATING THE INNER CONTENT
                 if scope_var:
                     scope_stack.append(scope_var)
-                
+
                 # If the block has exactly ONE item, and it's a simple ASSIGN tuple
                 if len(block_items) == 1 and isinstance(block_items[0], tuple) and block_items[0][0] == "ASSIGN":
                     inner_left = block_items[0][1]
@@ -73,7 +108,7 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
 
                     # Ensure the inner value is a primitive (not another nested block/tuple/list)
                     if not isinstance(inner_right, (tuple, list)):
-                        
+
                         # RESOLVE VARIABLES FOR SINGLE-LINE BLOCKS
                         inner_left = resolve_scopes(inner_left, scope_stack)
                         if isinstance(inner_right, str):
@@ -89,19 +124,19 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
                 # If it's a complex block (multiple items or nested blocks), do standard multi-line
                 # IMPORTANT: PASS scope_stack INTO RECURSION!
                 block_content = generate_hoi4_code(block_items, indent_level + 1, scope_stack)
-                
+
                 # POP THE VARIABLE FROM THE STACK BEFORE EXITING
                 if scope_var:
                     scope_stack.pop()
-                    
+
                 return f"{spacing}{left} {op} {{\n{block_content}{spacing}}}\n"
-            
+
             # Existing: Primitive value assignment (e.g. log = "Hello")
             else:
                 # REPLACE VARIABLES ON THE RIGHT SIDE (if it is a string)
                 if isinstance(right, str):
                     right = resolve_scopes(right, scope_stack)
-                    
+
                 return f"{spacing}{left} {op} {right}\n"
 
     if isinstance(ast, str) or isinstance(ast, int) or isinstance(ast, float):
@@ -111,7 +146,7 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
 
 def compile_folder(target_folder):
     """
-    Recursively finds all .hsl files in the specified directory and all 
+    Recursively finds all .hsl files in the specified directory and all
     its subdirectories, then compiles them into the game's .txt files.
     """
     grammar_path = "modules/grammar.lark"
@@ -120,32 +155,33 @@ def compile_folder(target_folder):
         return
     # Initialize Lark
     print(f"Loading grammar from {grammar_path}...")
-    parser = Lark.open(grammar_path, start='start', parser='lalr')
+    parser = Lark.open(grammar_path, start='start', parser='lalr', postlex=HslIndenter())
     transformer = HslTransformer()
-    
+
     global_macros = {} # This dictionary will store all processed macros
     hml_path = os.path.join(target_folder, "macros.hml")
-    
+
     if os.path.exists(hml_path):
         print(f"📖 Found macro library: {hml_path}. Loading...")
         try:
             with open(hml_path, "r", encoding="utf-8-sig") as f:
                 hml_code = f.read()
-            
+
+            hml_code = preserve_empty_lines(hml_code)
             # Parse the HML code into an AST tree using our grammar
             hml_tree = parser.parse(hml_code)
-            
+
             # Pass our global_macros dict to the transformer to fill it
             hml_transformer = HslTransformer(external_macros=global_macros)
             hml_transformer.transform(hml_tree)
-            
+
             print(f"✅ Successfully loaded macros: {len(global_macros)}")
         except Exception as e:
             print(f"❌ Error while reading macro library: {e}")
             return
-    
+
     transformer.macros = global_macros
-    
+
     if not os.path.exists(target_folder):
         print(f"Error: The specified directory '{target_folder}' does not exist!")
         return
@@ -160,14 +196,14 @@ def compile_folder(target_folder):
     for root, dirs, files in os.walk(target_folder):
         # Filter only files ending with .hsl
         hsl_files = [f for f in files if f.endswith('.hsl')]
-        
+
         if not hsl_files:
             continue
 
         for filename in hsl_files:
             # Build the absolute path to the source .hsl file
             hsl_path = os.path.join(root, filename)
-            
+
             # Generate the name and path for the output .txt file in the same subdirectory
             txt_filename = filename.rsplit('.', 1)[0] + ".txt"
             txt_path = os.path.join(root, txt_filename)
@@ -178,15 +214,20 @@ def compile_folder(target_folder):
 
             try:
                 with open(hsl_path, "r", encoding="utf-8-sig") as f:
-                    source_code = f.read()
-                
-                # Find all empty lines and replace them with a special hidden comment
-                source_code = re.sub(r'^[ \t]*$', '#___EMPTY_LINE___', source_code, flags=re.MULTILINE)
-                
+                    source_code = f.read() + "\n"
+
+                # Fill empty lines with indent-aware markers
+                source_code = preserve_empty_lines(source_code)
+
                 # Parsing, transformation, and code generation
                 tree = parser.parse(source_code)
                 ast_data = transformer.transform(tree)
                 final_code = generate_hoi4_code(ast_data)
+
+                # Strip markers from the final generated code.
+                # The regex finds all lines containing only whitespace and our marker,
+                # and replaces them with a real empty line.
+                final_code = re.sub(r'^[ \t]*#___EMPTY_LINE___$', '', final_code, flags=re.MULTILINE)
 
                 with open(txt_path, "w", encoding="utf-8") as f:
                     f.write(final_code)
@@ -195,7 +236,7 @@ def compile_folder(target_folder):
 
             except Exception as e:
                 print(f"Error in file {filename}: {e}")
-            
+
     print("-" * 50)
     print(f"Recursive compilation completed! Total files processed: {compiled_count}")
 

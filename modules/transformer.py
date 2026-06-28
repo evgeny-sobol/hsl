@@ -9,21 +9,33 @@ class HslTransformer(Transformer):
         # Store the macros dictionary in the transformer instance
         # If external_macros was passed, we use it; otherwise, we start with an empty dict
         self.macros = external_macros if external_macros is not None else {}
-    
+
     def unquoted_value(self, items):
         val = str(items[0])
-        if val.isdigit(): return int(val)
-        try: return float(val)
-        except ValueError: return val
+
+        # If this is a number (contains digits and possibly underscores, dots, or a minus sign),
+        # create a clean copy of the string without '_' characters for conversion attempt.
+        clean_val = val.replace('_', '')
+
+        # Check if the cleaned string is an integer.
+        # Use lstrip('-') to correctly handle negative numbers like -1_000
+        if clean_val.lstrip('-').isdigit():
+            return int(clean_val)
+
+        try:
+            return float(clean_val)
+        except ValueError:
+            # If it turned out to be a plain string/variable (e.g. current_year) — return the original
+            return val
 
     # Ensure strings retain their quotation marks in the final code
     def string(self, items):
         val = str(items[0])
-        
+
         # If for some reason the quotes were stripped, we force them back on
         if not val.startswith('"'):
             val = f'"{val}"'
-            
+
         return val
 
     def operator(self, items):
@@ -37,7 +49,7 @@ class HslTransformer(Transformer):
     def array_method(self, items):
         arr_name = str(items[0])
         method = str(items[1]) # Method name (e.g., clear, add, remove)
-        
+
         # If there's an argument in parentheses, it will be in items[2]
         val = items[2] if len(items) > 2 else None
 
@@ -55,12 +67,12 @@ class HslTransformer(Transformer):
         arr_name = str(items[0])
         index = items[1]
         val = items[3] # items[2] is the "<<" token, so the value is in items[3]
-        
+
         target = f"{arr_name}^{index}"
         return ("ASSIGN", "set_variable", "=", ("BLOCK", [("ASSIGN", target, "=", val)]))
 
-    # Reading array length: arr_name[].length()
-    def array_length(self, items):
+    # Reading array size: arr_name[].size()
+    def array_size(self, items):
         arr_name = str(items[0])
         return f"{arr_name}^num"
 
@@ -70,15 +82,15 @@ class HslTransformer(Transformer):
         index = items[1]
         return f"{arr_name}^{index}"
 
-    # Transform: x << 10  ==>  set_variable = { x = 10 }
+    # Transform: x <- 10  ==>  set_variable = { x = 10 }
     def short_assign(self, items):
         var_name = str(items[0])
         var_value = items[2]
-        
+
         # If the name starts with an underscore, it is a temporary variable
         if var_name.startswith("_"):
             return ("ASSIGN", "set_temp_variable", "=", ("BLOCK", [("ASSIGN", var_name, "=", var_value)]))
-        
+
         # For regular variables, keep the old logic
         return ("ASSIGN", "set_variable", "=", ("BLOCK", [("ASSIGN", var_name, "=", var_value)]))
 
@@ -86,10 +98,10 @@ class HslTransformer(Transformer):
         var_name = str(items[0])
         op = str(items[1])
         value = items[2]
-        
+
         # Check if it is a temporary variable
         is_temp = var_name.startswith("_")
-        
+
         # Select the correct command based on the operator
         if op == "+=":
             hoi_command = "add_to_temp_variable" if is_temp else "add_to_variable"
@@ -114,34 +126,34 @@ class HslTransformer(Transformer):
             op_str = "="
 
         return ("ASSIGN", "check_variable", "=", ("BLOCK", [("ASSIGN", left, op_str, right)]))
-    
+
     # Check if a value exists in an array: val in arr_name[]
     def array_check(self, items):
         val = items[0]
         arr_name = str(items[1]) # The array name (Lark drops the brackets automatically)
-        
+
         # Generates: is_in_array = { arr_name = val }
         return ("ASSIGN", "is_in_array", "=", ("BLOCK", [("ASSIGN", arr_name, "=", val)]))
-    
+
     # Check if a value DOES NOT exist in an array: val not in arr_name[]
     def array_not_check(self, items):
         val = items[0]
         # items[1] is the NOT_OP token ("not") passed by Lark. We just ignore it.
         arr_name = str(items[2])
-        
+
         # Create the standard 'is_in_array' block
         in_array_block = ("ASSIGN", "is_in_array", "=", ("BLOCK", [("ASSIGN", arr_name, "=", val)]))
-        
+
         # Wrap it inside a 'NOT = { ... }' block for the Clausewitz engine
         return ("ASSIGN", "NOT", "=", ("BLOCK", [in_array_block]))
-    
+
     def inc_dec(self, items):
         var_name = str(items[0])
         op = str(items[1])
-        
+
         # Check if it is a temporary variable
         is_temp = var_name.startswith("_")
-        
+
         # Choose the command depending on ++ or --
         if op == "++":
             hoi_command = "add_to_temp_variable" if is_temp else "add_to_variable"
@@ -180,97 +192,64 @@ class HslTransformer(Transformer):
     def logical_not(self, items):
         # items[1] is the condition itself that comes after the ! sign
         condition_ast = items[1]
-        
+
         # If there is a single word inside the ! sign (e.g., "is_major")
         if isinstance(condition_ast, str):
             # Explicitly turn it into the "is_major = yes" structure
             condition_ast = ("ASSIGN", condition_ast, "=", "yes")
-            
+
         # Wrap the result into the game's NOT = { ... } block
         return ("ASSIGN", "NOT", "=", ("BLOCK", [condition_ast]))
 
-    # Updated modern_if that can fix single words across the entire logical structure
-    def modern_if(self, items):
-        condition_ast, block_ast = items
-        effects = block_ast[1]
-        
-        # Recursive function for deep conversion of single strings in condition chains
-        def fix_conditions(ast):
-            # If it is a single string in nested AND/OR blocks (e.g., "has_same_ideology")
-            if isinstance(ast, str):
-                return ("ASSIGN", ast, "=", "yes")
-            
-            if isinstance(ast, tuple) and ast[0] == "ASSIGN":
-                node_type = ast[1] # "AND", "OR", "NOT", "check_variable", etc.
-                
-                # If it is an AND or OR logical block
-                if node_type in ["AND", "OR"]:
-                    inner_items = ast[3][1]
-                    fixed_items = [fix_conditions(item) for item in inner_items]
-                    return ("ASSIGN", node_type, "=", ("BLOCK", fixed_items))
-                
-                # If it is a NOT block (which might have been created by logical_not method earlier)
-                if node_type == "NOT":
-                    inner_items = ast[3][1]
-                    # NOT contains a list of conditions inside, process them too
-                    fixed_items = [fix_conditions(item) for item in inner_items]
-                    return ("ASSIGN", "NOT", "=", ("BLOCK", fixed_items))
-            
-            return ast
+    def if_statement(self, items):
+        condition = items[0]
+        block_ast = items[-1] # Block is always the last element
 
-        # Fix all single words in our if condition tree
-        fixed_condition = fix_conditions(condition_ast)
-        
-        limit_ast = ("ASSIGN", "limit", "=", ("BLOCK", [fixed_condition]))
-        if_body = [limit_ast] + effects
-        return ("ASSIGN", "if", "=", ("BLOCK", if_body))
-    
-    # Handle 'elif' identically to 'if', but output 'else_if' for the Clausewitz engine
+        # Automatically build the vanilla limit = { ... } block for HoI4
+        limit_block = ("ASSIGN", "limit", "=", ("BLOCK", [condition]))
+
+        # Extract commands from the original block
+        original_commands = block_ast[1]
+        scope_var = block_ast[2] if len(block_ast) > 2 else None
+
+        # Concatenate: limit block first, then the actual commands
+        new_block_items = [limit_block] + original_commands
+
+        return ("ASSIGN", "if", "=", ("BLOCK", new_block_items, scope_var))
+
     def elif_statement(self, items):
-        condition_ast = items[0]
-        block_ast = items[1] # This is a tuple: ("BLOCK", [list of items])
-        
-        # Extract the internal list of commands from the block
-        block_items = block_ast[1]
-        
-        # Create the standard limit block required by HoI4
-        limit_block = ("ASSIGN", "limit", "=", ("BLOCK", [condition_ast]))
-        
-        # Insert the limit block at the very beginning of the else_if block
-        new_block_items = [limit_block] + block_items
-        
-        # Return as a standard HoI4 assignment: else_if = { ... }
-        return ("ASSIGN", "else_if", "=", ("BLOCK", new_block_items))
-    
-    # PROCESSING OLD GAME IF: if = { ... }
-    def vanilla_if(self, items):
-        # items[0] contains EQUAL (=) token, items[1] contains BLOCK block
-        block_ast = items[1]
-        # We just return it in the standard AST format for the game
-        return ("ASSIGN", "if", "=", block_ast)
-    
-    # Convert print("text") to log = "text"
-    def print_statement(self, items):
-        val = items[0] # The value inside the parentheses
-        
-        # Return as a standard HoI4 assignment: log = val
-        return ("ASSIGN", "log", "=", val)
-    
+        condition = items[0]
+        block_ast = items[-1]
+
+        limit_block = ("ASSIGN", "limit", "=", ("BLOCK", [condition]))
+        original_commands = block_ast[1]
+        scope_var = block_ast[2] if len(block_ast) > 2 else None
+
+        new_block_items = [limit_block] + original_commands
+
+        # HoI4 uses "else_if" as the keyword
+        return ("ASSIGN", "else_if", "=", ("BLOCK", new_block_items, scope_var))
+
+    def else_statement(self, items):
+        block_ast = items[-1]
+        # The else block does not need a limit — return the block as-is
+        return ("ASSIGN", "else", "=", block_ast)
+
     # Preserve comments in our AST
     def comment(self, items):
         # items[0] contains the actual text of the comment, e.g., "# My comment"
         comment_text = str(items[0])
         return ("COMMENT", comment_text)
-    
-    # Context declaration interceptor: c >>
+
+    # Context declaration interceptor: c ->
     def scope_def(self, items):
         # Return a special tuple containing the variable name
-        return ("SCOPE_DEF", str(items[0]))
-    
+        return ("SCOPE_DEF", str(items[1]))
+
     def block(self, items):
         processed_items = []
         scope_var = None
-        
+
         for item in items:
             # If a context declaration is encountered, store it for future reference
             if isinstance(item, tuple) and item[0] == "SCOPE_DEF":
@@ -280,7 +259,7 @@ class HslTransformer(Transformer):
             else:
                 processed_items.append(item)
         return ("BLOCK", processed_items, scope_var)
-    
+
     # Recursive AST Replacer
     def _replace_args_in_ast(self, node, param_map):
         if isinstance(node, str):
@@ -291,18 +270,18 @@ class HslTransformer(Transformer):
                 pattern = r'\b' + re.escape(str(param)) + r'\b'
                 new_str = re.sub(pattern, str(arg), new_str)
             return new_str
-            
+
         elif isinstance(node, list):
             # Recursively process lists
             return [self._replace_args_in_ast(child, param_map) for child in node]
-            
+
         elif isinstance(node, tuple):
             # Recursively process tuples
             return tuple(self._replace_args_in_ast(child, param_map) for child in node)
-            
+
         else:
             return node
-    
+
     # Helper to unpack parameters
     def macro_params(self, items):
         return [str(item) for item in items]
@@ -314,7 +293,7 @@ class HslTransformer(Transformer):
     # Macro Definition
     def macro_def(self, items):
         macro_name = str(items[0])
-        
+
         # Check if parameters were provided
         if len(items) == 3:
             params = items[1]
@@ -322,83 +301,100 @@ class HslTransformer(Transformer):
         else:
             params = []
             block_ast = items[1]
-            
+
         # Store both parameters and the body block
         self.macros[macro_name] = {
             "params": params,
-            "body": block_ast[1] 
+            "body": block_ast[1]
         }
         return None
-    
+
     def func_call(self, items):
         func_name = str(items[0])
-        
+
         if len(items) > 1 and items[1] is not None:
             # Convert argument to string for easier manipulation
             arg = str(items[1])
-            
+
             # REPLACEMENT MAGIC
             # Map standard true/false values to Clausewitz yes/no primitives
             if arg == "true":
                 arg = "yes"
             elif arg == "false":
                 arg = "no"
-                
+
             return ("ASSIGN", func_name, "=", arg)
         else:
             # If parentheses are empty, default to standard HoI4 trigger behavior ("= yes")
             return ("ASSIGN", func_name, "=", "yes")
-    
+
     # Macro Call
     def macro_call(self, items):
         # Extract the name and strip the leading '@' prefix character
         macro_name = str(items[0])[1:]
-        
+
         # Check if arguments were provided
         if len(items) == 2:
             args = items[1]
         else:
             args = []
-            
+
         macro_data = self.macros.get(macro_name)
         if not macro_data:
             raise ValueError(f"Error: Macro '{macro_name}' is not found in the library!")
-            
+
         params = macro_data["params"]
         body = macro_data["body"]
-        
+
         # Validation
         if len(args) != len(params):
             raise ValueError(f"Error: Macro '{macro_name}' expects {len(params)} arguments, but got {len(args)}!")
-            
+
         # Create a mapping dictionary: {'country': 'SWE', 'amount': '50'}
         param_map = dict(zip(params, args))
-        
+
         # Return a deep-copied AST with all variables replaced!
         return self._replace_args_in_ast(body, param_map)
-    
+
     # Process chain calls: scope().filter(condition) = { block }
     def linq_statement(self, items):
         scope_name = str(items[0])
         condition = items[1]
-        block_ast = items[2] # This is a tuple structured as ("BLOCK", [commands_list], scope_var)
-        
+
+        scope_var = None
+        block_ast = None
+
+        # Logic: if items[2] is a ("SCOPE_DEF", name) tuple,
+        # it means the scope arrow (->) was used
+        if isinstance(items[2], tuple) and items[2][0] == "SCOPE_DEF":
+            scope_var = items[2][1]
+            block_ast = items[3]
+        else:
+            block_ast = items[2]
+
         # Generate a classic Clausewitz 'limit = { ... }' block
         # Wrap condition into a list since BLOCK nodes expect an iterable
         limit_block = ("ASSIGN", "limit", "=", ("BLOCK", [condition]))
-        
+
         # Extract commands from the original HSL block
         original_commands = block_ast[1]
-        
+
         # Extract the context variable name if it was passed via 'c >>'
-        scope_var = block_ast[2] if len(block_ast) > 2 else None
-        
+        # scope_var = block_ast[2] if len(block_ast) > 2 else None
+
         # Concatenate elements: prepend the limit_block before execution effects
         new_block_items = [limit_block] + original_commands
-        
+
         # Return as a standard block assignment tuple, passing scope_var along
         return ("ASSIGN", scope_name, "=", ("BLOCK", new_block_items, scope_var))
-    
+
+    # Handle generic named blocks like effect:, trigger:, option:
+    def generic_block(self, items):
+        block_name = str(items[0])
+        block_ast = items[-1]
+
+        return ("ASSIGN", block_name, "=", block_ast)
+
     def start(self, items):
         # Filter out None values (which are left by macro definitions)
         return [item for item in items if item is not None]
