@@ -1,121 +1,161 @@
-start: (_NEWLINE | item)*
+# =============================================================================
+# ENTRY POINT
+# =============================================================================
+
+start: (_NL | item)*
 
 ?item: if_statement
      | elif_statement
      | else_statement
      | linq_statement
      | macro_def
-     | macro_call _NEWLINE
-     | func_call _NEWLINE
-     | assignment _NEWLINE
-     | array_method _NEWLINE
-     | array_assign _NEWLINE
-     | short_assign _NEWLINE
-     | math_assign _NEWLINE
-     | inc_dec _NEWLINE
-     | var_check _NEWLINE
-     | print_statement _NEWLINE
-     | comment _NEWLINE
+     | macro_call       _NL
+     | func_call        _NL
+     | scoped_func_call _NL
+     | assignment       _NL
+     | short_assign     _NL
+     | math_assign      _NL
+     | inc_dec          _NL
+     | array_method     _NL
+     | array_assign     _NL
+     | var_check        _NL
+     | comment          _NL
      | generic_block
 
-# Update macro definition and call rules to accept optional parameters
-macro_def: "macro" UNQUOTED_VALUE "(" macro_params? ")" block _NEWLINE?
-macro_call: MACRO_NAME "(" macro_args? ")"
-# Add rules for comma-separated lists
-# Lark automatically drops literal commas (",") because they are anonymous terminals
-macro_params: UNQUOTED_VALUE ("," UNQUOTED_VALUE)*
-macro_args: value ("," value)*
+# =============================================================================
+# CONTROL FLOW
+# =============================================================================
 
-if_statement: "if" ( "(" condition ")" | condition ) block
+if_statement:   "if"   ( "(" condition ")" | condition ) block
 elif_statement: "elif" ( "(" condition ")" | condition ) block
 else_statement: "else" block
 
-condition: conj_element (OR_OP conj_element)*
+# =============================================================================
+# CONDITIONS
+# =============================================================================
+
+condition:     conj_element (OR_OP conj_element)*
 ?conj_element: not_element (AND_OP not_element)*
-?not_element: NOT_OP cond_atom -> logical_not
-            | cond_atom
-?cond_atom: func_call
-          | var_check
-          | array_check
-          | array_not_check
-          | assignment
-          | value
+?not_element:  NOT_OP cond_atom -> logical_not
+            |  cond_atom
+?cond_atom:    func_call
+          |    scoped_func_call
+          |    var_check
+          |    array_check
+          |    array_not_check
+          |    assignment
+          |    value
+          |    "(" condition ")"
 
-assignment: value operator value
+# =============================================================================
+# FUNCTIONS & CALLS
+# =============================================================================
 
-func_call: UNQUOTED_VALUE "(" [value] ")"
+func_call:        UNQUOTED_VALUE "(" [value] ")"
+scoped_func_call: UNQUOTED_VALUE "::" UNQUOTED_VALUE "(" [value] ")"
 
-linq_statement.2: UNQUOTED_VALUE "()" _NEWLINE* "." _NEWLINE* "which" "(" condition ")" scope_def? block
+# =============================================================================
+# MACROS
+# =============================================================================
 
-array_method: UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
-array_assign: UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
+# Lark drops literal commas (",") because they are anonymous terminals
+macro_def:    "macro" UNQUOTED_VALUE "(" macro_params? ")" block _NL?
+macro_call:   MACRO_NAME "(" macro_args? ")"
+macro_params: UNQUOTED_VALUE ("," UNQUOTED_VALUE)*
+macro_args:   value ("," value)*
 
-short_assign: value SHORT_ASSIGN value
+# =============================================================================
+# LINQ
+# =============================================================================
 
-math_assign: value MATH_OPERATOR value
+linq_statement.2: "for" UNQUOTED_VALUE "()" scope_def? block
+                | "for" UNQUOTED_VALUE "()" _NL* "." _NL* "which" "(" condition ")" scope_def? block
 
-var_check: value COMP_OPERATOR value
+# =============================================================================
+# ASSIGNMENTS
+# =============================================================================
 
-array_check: value "in" UNQUOTED_VALUE "[]"
-array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
-
+assignment:    value operator value
+short_assign:  value SHORT_ASSIGN value
+math_assign:   value MATH_OPERATOR value
 inc_dec: value INC_DEC_OP
 
-block: ":" scope_def? comment? _NEWLINE _INDENT (_NEWLINE | item)* _DEDENT
-print_statement: "print" "(" value ")"
-comment: COMMENT
-generic_block: UNQUOTED_VALUE "()"? block
+# =============================================================================
+# ARRAYS
+# =============================================================================
+
+array_method:    UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
+array_assign:    UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
+array_check:     value "in" UNQUOTED_VALUE "[]"
+array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
+array_size:      UNQUOTED_VALUE "[].size()"
+array_access:    UNQUOTED_VALUE "[" value "]"
+
+# =============================================================================
+# VALUES
+# =============================================================================
 
 ?value: array_size
       | array_access
+      | COUNTRY_TAG    -> country_tag
       | UNQUOTED_VALUE -> unquoted_value
       | string
 
 string: ESCAPED_STRING
 
-operator: EQUAL
-        | COMP_OPERATOR_VANILLA
+# =============================================================================
+# BLOCKS & MISC
+# =============================================================================
 
-EQUAL: "="
-COMP_OPERATOR: "==" | "!=" | ">" | "<" | ">=" | "<="
+block:         ":" scope_def? comment? _NL _INDENT (_NL | item)* _DEDENT
+     |         "=" "{" (_NL | item)* "}"
+scope_def:     SCOPE_ARROW UNQUOTED_VALUE
+generic_block: UNQUOTED_VALUE "()"? block
+comment:       COMMENT
+var_check:     value COMP_OPERATOR value
+operator:      "=" | COMP_OPERATOR_VANILLA
+
+# =============================================================================
+# TERMINALS — OPERATORS
+# =============================================================================
+
+COMP_OPERATOR:         "==" | "!=" | ">" | "<" | ">=" | "<="
 COMP_OPERATOR_VANILLA: ">" | "<" | ">=" | "<="
+SHORT_ASSIGN.2:        "<-"
+MATH_OPERATOR.2:       "+=" | "-=" | "*=" | "/="
+INC_DEC_OP.2:          "++" | "--"
+NOT_OP:                "not"
+AND_OP:                "and"
+OR_OP:                 "or"
 
-INC_DEC_OP.2: "++" | "--"
-NOT_OP: "not"
-AND_OP: "and"
-OR_OP: "or"
+# =============================================================================
+# TERMINALS — VALUES & NAMES
+# =============================================================================
 
-array_size: UNQUOTED_VALUE "[].size()"
-array_access: UNQUOTED_VALUE "[" value "]"
-
-SHORT_ASSIGN.2: "<-"
-MATH_OPERATOR.2: "+=" | "-=" | "*=" | "/="
-
-MACRO_NAME.2: "@" /[a-zA-Z0-9_]+/
-SCOPE_ARROW.2: "->"
-
-scope_def: SCOPE_ARROW UNQUOTED_VALUE
-
-# Allow digits with optional single underscores between them
+# Digits with optional single underscores as separators (e.g. 1_000_000)
 UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.]+/
-
-COMMENT: /#[^\n]*/
+COUNTRY_TAG:    "$" /[A-Z0-9_]+/
+MACRO_NAME.2:   "@" /[a-zA-Z0-9_]+/
+SCOPE_ARROW.2:  "->"
+COMMENT:        /#[^\n]*/
 
 %import common.ESCAPED_STRING
-%import common.WS
 
-# Declare indentation tokens for HslIndenter
+# =============================================================================
+# WHITESPACE & INDENTATION
+# =============================================================================
+
+# Declare indentation tokens
 %declare _INDENT _DEDENT
 
-# Newlines are now significant (they consume trailing whitespace and blank lines)
-_NEWLINE: ( /\r?\n[\t ]*/ )+
+# Newlines are significant - they consume trailing whitespace
+_NL: ( /\r?\n[\t ]*/ )+
 
-# Ignore spaces and tabs only WITHIN a line
+# Spaces and tabs are ignored within a line
 %ignore /[\t ]+/
 
-# Explicitly name brackets with a leading underscore.
-# Thanks to '_', Lark will hide them from the AST,
-#   and transformer.py will continue to receive clean data as if nothing had changed
+# Named brackets let Lark hide them from the AST,
+# so transformer.py receives clean data without bracket tokens
 _LPAR: "("
 _RPAR: ")"
 _LSQB: "["
