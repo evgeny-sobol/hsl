@@ -10,38 +10,52 @@ class ConditionsMixin:
 
     # PROCESSING OR (||) CHAIN AND CONDITION ROOT
     def condition(self, items):
-        # Remove "||" operator tokens from the list
-        pure_items = [x for x in items if x != "or"]
+        # Remove "||" operator tokens from the list; fold any macro expansion
+        # (a list of statements) used as an OR branch into a single node.
+        pure_items = [self._fold_macro(x) for x in items if x != "or"]
 
-        # If there is only one || block, just pass its structure further
         if len(pure_items) == 1:
             return pure_items[0]
 
-        # If there are multiple blocks, wrap them into the game's OR = { ... }
         return ("ASSIGN", "OR", "=", ("BLOCK", pure_items))
 
     # PROCESSING AND (&&) CHAIN
     def conj_element(self, items):
-        pure_items = [x for x in items if x != "and"]
+        pure_items = []
+        for x in items:
+            if x == "and":
+                continue
+            # A macro call expands to a list of statements; inside an AND chain
+            # its statements are spliced in as plain sibling triggers.
+            if isinstance(x, list):
+                pure_items.extend(x)
+            else:
+                pure_items.append(x)
 
-        # If the condition is singular
         if len(pure_items) == 1:
             return pure_items[0]
 
-        # If there are multiple conditions, wrap them into the game's AND = { ... }
         return ("ASSIGN", "AND", "=", ("BLOCK", pure_items))
+
+    # A macro call expands to a LIST of statements. Used as one condition atom
+    # it means "all of them hold" → fold into an implicit AND (or the bare
+    # statement when the macro body is a single line). Non-macro nodes pass through.
+    def _fold_macro(self, node):
+        if isinstance(node, list):
+            if len(node) == 1:
+                return node[0]
+            return ("ASSIGN", "AND", "=", ("BLOCK", list(node)))
+        return node
 
     # Method for intercepting the ! sign at the base level
     def logical_not(self, items):
-        # items[1] is the condition itself that comes after the ! sign
-        condition_ast = items[1]
+        # Fold a macro expansion first, so 'not @macro()' becomes NOT of the
+        # whole conjunction rather than a NOR over its statements.
+        condition_ast = self._fold_macro(items[1])
 
-        # If there is a single word inside the ! sign (e.g., "is_major")
         if isinstance(condition_ast, str):
-            # Explicitly turn it into the "is_major = yes" structure
             condition_ast = ("ASSIGN", condition_ast, "=", "yes")
 
-        # Wrap the result into the game's NOT = { ... } block
         return ("ASSIGN", "NOT", "=", ("BLOCK", [condition_ast]))
 
     # VARIABLE CHECK TRANSFORMATION

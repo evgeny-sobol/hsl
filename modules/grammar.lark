@@ -40,6 +40,7 @@ condition:     conj_element (OR_OP conj_element)*
             |  cond_atom
 ?cond_atom:    func_call
           |    scoped_func_call
+          |    macro_call
           |    var_check
           |    array_check
           |    array_not_check
