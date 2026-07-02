@@ -237,9 +237,10 @@ def main():
     path = sys.argv[1]
     results = process_file(path)
 
+    print("focus_id,ai_will_do")
     for focus_id, ai_will_do in results:
         value = ai_will_do if ai_will_do is not None else "_"
-        print(f"{focus_id}, {value}")
+        print(f"{focus_id},{value}")
 
 
 if __name__ == "__main__":

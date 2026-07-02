@@ -123,7 +123,32 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
 
     return ""
 
-def compile_fragment(lines, parser, transformer):
+def _mtime(path):
+    """Modification time of `path`, or None if it does not exist."""
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
+
+def _is_fresh(out_path, ingredient_paths, floor_mtime=0.0):
+    """
+    True if `out_path` exists and is at least as new as every ingredient.
+
+    `floor_mtime` is an extra dependency timestamp (e.g. the newest .hml macro
+    library) that applies to every output. A missing ingredient is ignored;
+    a missing output is never fresh.
+    """
+    out_m = _mtime(out_path)
+    if out_m is None:
+        return False
+    newest_dep = floor_mtime
+    for p in ingredient_paths:
+        m = _mtime(p)
+        if m is not None and m > newest_dep:
+            newest_dep = m
+    return out_m >= newest_dep
+
+def compile_fragment(lines, parser, transformer, cache=None):
     """
     Compile a snippet of HSL source lines into HoI4 code.
 
@@ -131,23 +156,40 @@ def compile_fragment(lines, parser, transformer):
     This is the exact per-file pipeline used by compile_folder, minus the file
     I/O, so .include payloads compile identically to standalone .hsl files
     (macros included, since the shared transformer is passed in).
+
+    `cache` (optional dict) memoizes results by payload text. Since macros are
+    fixed for the duration of a run, identical payloads — common when many
+    focuses get the same ai_will_do override — are parsed only once.
     """
-    src = "\n".join(lines) + "\n"
-    src = preserve_empty_lines(src)
-    tree = parser.parse(src)
+    src = "\n".join(lines)
+    if cache is not None and src in cache:
+        return cache[src]
+
+    prepared = preserve_empty_lines(src + "\n")
+    tree = parser.parse(prepared)
     ast_data = transformer.transform(tree)
     code = generate_hoi4_code(ast_data)
     code = re.sub(r'^[ \t]*#___EMPTY_LINE___$', '', code, flags=re.MULTILINE)
-    return code.rstrip("\n")
+    code = code.rstrip("\n")
 
-def process_include_file(include_path, target_folder, vanilla_root, parser, transformer):
+    if cache is not None:
+        cache[src] = code
+    return code
+
+def process_include_file(include_path, target_folder, vanilla_root, parser, transformer,
+                         macros_mtime=0.0, force=False, fragment_cache=None):
     """
     Splice an .include delta into its vanilla counterpart and write the
     resulting .txt next to the .include file.
 
     The .include mirrors the vanilla directory layout: an .include at
     <mod>/common/on_actions/foo.include targets <vanilla>/common/on_actions/foo.txt.
-    Returns True on success, False if the vanilla source is missing.
+
+    Returns one of: 'built', 'skipped' (output already up to date), or
+    'missing' (vanilla source not found). Rebuild is skipped when the output
+    exists and is newer than all three ingredients: the .include, the vanilla
+    .txt, and the newest .hml macro library (macros_mtime). `force` bypasses
+    the freshness check.
     """
     rel = os.path.relpath(include_path, target_folder)
     rel_txt = rel.rsplit('.', 1)[0] + ".txt"
@@ -156,7 +198,10 @@ def process_include_file(include_path, target_folder, vanilla_root, parser, tran
 
     if not os.path.exists(vanilla_path):
         print(f"  Vanilla source not found: {vanilla_path}")
-        return False
+        return 'missing'
+
+    if not force and _is_fresh(out_path, [include_path, vanilla_path], macros_mtime):
+        return 'skipped'
 
     with open(vanilla_path, "r", encoding="utf-8-sig") as f:
         vanilla_text = f.read()
@@ -166,14 +211,14 @@ def process_include_file(include_path, target_folder, vanilla_root, parser, tran
     result = includes.transpile_include_source(
         vanilla_text,
         include_src,
-        lambda payload: compile_fragment(payload, parser, transformer),
+        lambda payload: compile_fragment(payload, parser, transformer, fragment_cache),
     )
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(result)
-    return True
+    return 'built'
 
-def compile_folder(target_folder, vanilla_root=None):
+def compile_folder(target_folder, vanilla_root=None, force=False):
     """
     Recursively finds all .hsl and .include files in the specified directory and
     all its subdirectories, then compiles them into the game's .txt files.
@@ -182,6 +227,10 @@ def compile_folder(target_folder, vanilla_root=None):
     .include - delta injections spliced into a mirrored vanilla file; requires
                vanilla_root to locate the original .txt.
     """
+    # Defensive: strip stray surrounding quotes (illegal in paths anyway) so a
+    # quoted vanilla root passed programmatically or via a shell quirk still works.
+    if vanilla_root:
+        vanilla_root = vanilla_root.strip().strip('"')
     grammar_path = "modules/grammar.lark"
     if not os.path.exists(grammar_path):
         print(f"Error: Grammar file '{grammar_path}' not found in the project root!")
@@ -201,6 +250,15 @@ def compile_folder(target_folder, vanilla_root=None):
         for f in files
         if f.endswith('.hml')
     )
+
+    # Newest macro-library timestamp: an implicit dependency of EVERY output,
+    # since both .hsl files and .include payloads compile through the macro-aware
+    # transformer. If any .hml changes, dependent outputs must be rebuilt.
+    macros_mtime = 0.0
+    for p in hml_paths:
+        m = _mtime(p)
+        if m is not None and m > macros_mtime:
+            macros_mtime = m
 
     if hml_paths:
         print(f"Found macro libraries: {len(hml_paths)}. Loading...")
@@ -248,6 +306,10 @@ def compile_folder(target_folder, vanilla_root=None):
     print("-" * 50)
 
     compiled_count = 0
+    skipped_count = 0
+
+    # Per-run memo for compiled .include payloads (safe: macros are fixed now).
+    fragment_cache = {}
 
     # Use os.walk to recursively traverse all subdirectories
     # root - current directory, dirs - list of subdirectories, files - files within it
@@ -270,6 +332,13 @@ def compile_folder(target_folder, vanilla_root=None):
 
             # Print the relative path to prettify the console output
             relative_path = os.path.relpath(hsl_path, target_folder)
+
+            # Incremental build: skip if the .txt is newer than the .hsl and
+            # every macro library.
+            if not force and _is_fresh(txt_path, [hsl_path], macros_mtime):
+                skipped_count += 1
+                continue
+
             print(f"Compiling: {relative_path}...")
 
             try:
@@ -301,34 +370,56 @@ def compile_folder(target_folder, vanilla_root=None):
         for filename in include_files:
             include_path = os.path.join(root, filename)
             relative_path = os.path.relpath(include_path, target_folder)
-            print(f"Including: {relative_path}...")
 
             if vanilla_root is None:
+                print(f"Including: {relative_path}...")
                 print("  No vanilla root provided (pass it as the 2nd argument). Skipped.")
                 continue
 
             try:
-                if process_include_file(include_path, target_folder, vanilla_root,
-                                        parser, transformer):
-                    compiled_count += 1
+                status = process_include_file(include_path, target_folder, vanilla_root,
+                                              parser, transformer,
+                                              macros_mtime=macros_mtime, force=force,
+                                              fragment_cache=fragment_cache)
             except (KeyError, ValueError) as e:
                 # Address resolution / structural errors: report and keep going.
+                print(f"Including: {relative_path}...")
                 print(f"  {filename}: {e}")
+                continue
             except Exception as e:
+                print(f"Including: {relative_path}...")
                 print(f"  Error in include {filename}: {e}")
+                continue
+
+            if status == 'built':
+                print(f"Including: {relative_path}...")
+                compiled_count += 1
+            elif status == 'skipped':
+                skipped_count += 1
+            # 'missing' already reported its own line inside process_include_file.
 
     print("-" * 50)
-    print(f"Recursive compilation completed! Total files processed: {compiled_count}")
+    summary = f"Recursive compilation completed! Total files processed: {compiled_count}"
+    if skipped_count:
+        summary += f", up to date (skipped): {skipped_count}"
+    print(summary)
 
 if __name__ == "__main__":
-    # By default, look for files in the current directory where the script is running
-    target_dir = "."
-    # Optional second argument: the vanilla game root, needed to resolve .include targets
-    vanilla_root = None
+    # Usage: python compiler.py [target_dir] [vanilla_root] [--force]
+    # --force (or -f) rebuilds everything, ignoring the incremental mtime check.
+    force = False
+    positional = []
+    for arg in sys.argv[1:]:
+        if arg in ('-f', '--force'):
+            force = True
+        else:
+            # Strip stray quotes: on Windows a trailing '\' before the closing
+            # quote (e.g. "C:\...\Hearts of Iron IV\") escapes the quote, leaving
+            # a literal '"' embedded in the argument. Quotes are illegal in paths
+            # anyway, so stripping them from the ends is always safe.
+            positional.append(arg.strip().strip('"'))
 
-    if len(sys.argv) > 1:
-        target_dir = sys.argv[1]
-    if len(sys.argv) > 2:
-        vanilla_root = sys.argv[2]
+    target_dir = positional[0] if positional else "."
+    vanilla_root = positional[1] if len(positional) > 1 else None
 
-    compile_folder(target_dir, vanilla_root)
+    compile_folder(target_dir, vanilla_root, force=force)
