@@ -49,9 +49,9 @@ if is_major() and has_ideology_group(democracy):
 @transfer_equipment($ENG, $FRA, 15_000)
 
 # LINQ-style filters
-for every_country() -> cty:
+for cty in every_country():
   # For every country, let's choose
   #   random major with different ideology as a rival.
-  for random_other_country().which(
-      is_major() and not has_government(cty)) -> rnd:
+  for rnd in random_other_country().which(
+      is_major() and not has_government(cty)):
     cty.rivals[].add(rnd)

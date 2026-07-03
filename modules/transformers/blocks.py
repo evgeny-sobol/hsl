@@ -8,20 +8,15 @@ class BlocksMixin:
 
     def block(self, items):
         processed_items = []
-        scope_var = None
 
         for item in items:
-            # If a context declaration is encountered, store it for future reference
-            if isinstance(item, tuple) and item[0] == "SCOPE_DEF":
-                scope_var = item[1]
-            elif isinstance(item, str):
+            # A bare word inside a block is a standalone flag/trigger → "= yes"
+            if isinstance(item, str):
                 processed_items.append(("ASSIGN", item, "=", "yes"))
             else:
                 processed_items.append(item)
 
-        return ("BLOCK", processed_items, scope_var)
-
-    # Context declaration interceptor: c ->
-    def scope_def(self, items):
-        # Return a special tuple containing the variable name
-        return ("SCOPE_DEF", str(items[1]))
+        # Third slot is the block's scope variable. Plain blocks never bind one
+        # (loop variables are attached by linq_statement, not here), so it's None;
+        # kept for a uniform BLOCK shape that downstream code can index safely.
+        return ("BLOCK", processed_items, None)

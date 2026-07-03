@@ -1,4 +1,11 @@
 class ConditionsMixin:
+    # Spread a top-level conjunction into bare sibling triggers.
+    # In Clausewitz scripting, triggers listed side by side inside a block
+    # (limit, root effect, etc.) are already implicitly AND-ed, so the
+    # outermost AND = { ... } wrapper is redundant. A nested AND inside an OR
+    # must stay, otherwise its children would become OR siblings — so we only
+    # ever unwrap ONE outermost level, and only at the point a condition is
+    # placed into such a block (the limit builders below).
     def unwrap_top_and(self, condition):
         if (isinstance(condition, tuple)
                 and condition[0] == "ASSIGN"
@@ -14,9 +21,11 @@ class ConditionsMixin:
         # (a list of statements) used as an OR branch into a single node.
         pure_items = [self._fold_macro(x) for x in items if x != "or"]
 
+        # If there is only one || block, just pass its structure further
         if len(pure_items) == 1:
             return pure_items[0]
 
+        # If there are multiple blocks, wrap them into the game's OR = { ... }
         return ("ASSIGN", "OR", "=", ("BLOCK", pure_items))
 
     # PROCESSING AND (&&) CHAIN
@@ -32,9 +41,11 @@ class ConditionsMixin:
             else:
                 pure_items.append(x)
 
+        # If the condition is singular
         if len(pure_items) == 1:
             return pure_items[0]
 
+        # If there are multiple conditions, wrap them into the game's AND = { ... }
         return ("ASSIGN", "AND", "=", ("BLOCK", pure_items))
 
     # A macro call expands to a LIST of statements. Used as one condition atom
@@ -49,13 +60,17 @@ class ConditionsMixin:
 
     # Method for intercepting the ! sign at the base level
     def logical_not(self, items):
+        # items[1] is the condition itself that comes after the ! sign.
         # Fold a macro expansion first, so 'not @macro()' becomes NOT of the
         # whole conjunction rather than a NOR over its statements.
         condition_ast = self._fold_macro(items[1])
 
+        # If there is a single word inside the ! sign (e.g., "is_major")
         if isinstance(condition_ast, str):
+            # Explicitly turn it into the "is_major = yes" structure
             condition_ast = ("ASSIGN", condition_ast, "=", "yes")
 
+        # Wrap the result into the game's NOT = { ... } block
         return ("ASSIGN", "NOT", "=", ("BLOCK", [condition_ast]))
 
     # VARIABLE CHECK TRANSFORMATION

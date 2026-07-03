@@ -69,8 +69,14 @@ macro_args:   value ("," value)*
 # LINQ
 # =============================================================================
 
-linq_statement.2: "for" UNQUOTED_VALUE "()" scope_def? block
-                | "for" UNQUOTED_VALUE "()" _NL* "." _NL* "which" "(" condition ")" scope_def? block
+linq_statement.2: "for" UNQUOTED_VALUE "()" block
+                | "for" UNQUOTED_VALUE "()" _NL* "." _NL* "which" "(" condition ")" block
+                | "for" loop_binding UNQUOTED_VALUE "()" block
+                | "for" loop_binding UNQUOTED_VALUE "()" _NL* "." _NL* "which" "(" condition ")" block
+
+# Python-style loop head: `cty in`. Emits a SCOPE_DEF marker that binds the
+# loop variable; the bare (bindingless) forms above just iterate.
+loop_binding: UNQUOTED_VALUE "in"
 
 # =============================================================================
 # ASSIGNMENTS
@@ -108,9 +114,8 @@ string: ESCAPED_STRING
 # BLOCKS & MISC
 # =============================================================================
 
-block:         ":" scope_def? comment? _NL _INDENT (_NL | item)* _DEDENT
+block:         ":" comment? _NL _INDENT (_NL | item)* _DEDENT
      |         "=" "{" (_NL | item)* "}"
-scope_def:     SCOPE_ARROW UNQUOTED_VALUE
 generic_block: UNQUOTED_VALUE "()"? block
 comment:       COMMENT
 var_check:     value COMP_OPERATOR value
@@ -137,7 +142,6 @@ OR_OP:                 "or"
 UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.]+/
 COUNTRY_TAG:    "$" /[A-Z0-9_]+/
 MACRO_NAME.2:   "@" /[a-zA-Z0-9_]+/
-SCOPE_ARROW.2:  "->"
 COMMENT:        /#[^\n]*/
 
 %import common.ESCAPED_STRING
