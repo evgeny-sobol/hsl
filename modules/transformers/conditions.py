@@ -87,6 +87,22 @@ class ConditionsMixin:
 
         return ("ASSIGN", "check_variable", "=", ("BLOCK", [("ASSIGN", left, op_str, right)]))
 
+    # NULL CHECK: var == null  /  var != null
+    #   x == null  ==>  NOT = { has_variable = x }
+    #   x != null  ==>  has_variable = x
+    def null_check(self, items):
+        left = items[0]
+        op_str = str(items[1])
+
+        has_var = ("ASSIGN", "has_variable", "=", left)
+
+        if op_str == "==":
+            return ("ASSIGN", "NOT", "=", ("BLOCK", [has_var]))
+        elif op_str == "!=":
+            return has_var
+
+        raise ValueError(f"Operator '{op_str}' is not valid with null; use '==' or '!='.")
+
     # Check if a value exists in an array: val in arr_name[]
     def array_check(self, items):
         val = items[0]

@@ -171,14 +171,32 @@ def _find_direct_key(text, start, end, key):
     return (None, None, None, None)
 
 
+def _direct_scalar_key(text, start, end, key):
+    """Return the scalar value of a direct (depth-0) `key = <scalar>` in
+    text[start:end], or None if absent or block-valued."""
+    val, _, _, is_block = _find_direct_key(text, start, end, key)
+    if val is None or is_block:
+        return None
+    return val.strip().strip('"')
+
+
 def extract_base_ai_will_do(text, start, end):
     """
     Given the body of one `focus = { ... }` block (start/end offsets),
     return the base ai_will_do value as a string, or None if absent.
 
-    - ai_will_do = 5           -> "5"
-    - ai_will_do = { factor = 5  modifier = { ... } }  -> "5" (the factor)
-    - ai_will_do = { modifier = { ... } }  (no factor) -> None
+    In a MTTH block the starting value is set at the top level (depth 0) by
+    either `base = X` (sets the value outright) or `factor = X` (multiplies the
+    implicit 1). Conditional `modifier = { ... }` blocks are ignored — only the
+    unconditional top-level value is read.
+
+    - ai_will_do = 5                                   -> "5"
+    - ai_will_do = { factor = 5  modifier = { ... } }  -> "5"
+    - ai_will_do = { base = 10   modifier = { ... } }  -> "10"
+    - ai_will_do = { modifier = { ... } }  (neither)   -> None
+
+    If both `base` and `factor` appear at the top level, `base` wins: it sets
+    the value outright, so it's the more faithful single "base value".
     """
     val, vstart, vend, is_block = _find_direct_key(text, start, end, "ai_will_do")
 
@@ -189,14 +207,12 @@ def extract_base_ai_will_do(text, start, end):
         # Bare scalar: ai_will_do = 5
         return val.strip().strip('"')
 
-    # It's a block: look for a direct `factor = <scalar>` inside it.
-    fval, fstart, fend, f_is_block = _find_direct_key(text, vstart, vend, "factor")
-    if fval is None:
-        return None
-    if f_is_block:
-        # factor itself is a block — not the simple scalar case we expect.
-        return None
-    return fval.strip().strip('"')
+    # Block form: read the top-level base value. `base` takes precedence over
+    # `factor` since it sets the value outright rather than multiplying.
+    base_val = _direct_scalar_key(text, vstart, vend, "base")
+    if base_val is not None:
+        return base_val
+    return _direct_scalar_key(text, vstart, vend, "factor")
 
 
 def extract_focus_id(text, start, end):

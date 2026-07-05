@@ -19,6 +19,10 @@ start: (_NL | item)*
      | array_method     _NL
      | array_assign     _NL
      | var_check        _NL
+     | not_statement    _NL
+     | clear_var        _NL
+     | clear_arr        _NL
+     | null_check       _NL
      | comment          _NL
      | generic_block
 
@@ -42,11 +46,17 @@ condition:     conj_element (OR_OP conj_element)*
           |    scoped_func_call
           |    macro_call
           |    var_check
+          |    null_check
           |    array_check
           |    array_not_check
           |    assignment
           |    value
           |    "(" condition ")"
+
+# Statement-level negation: `not <trigger>` as a standalone line (e.g. inside
+# a macro body). Reuses cond_atom + the logical_not handler, so it expands to
+# the same NOT = { ... } block that `NOT::trigger()` produced.
+not_statement: NOT_OP cond_atom -> logical_not
 
 # =============================================================================
 # FUNCTIONS & CALLS
@@ -84,6 +94,7 @@ loop_binding: UNQUOTED_VALUE "in"
 
 assignment:    value operator value
 short_assign:  value SHORT_ASSIGN value
+clear_var:     value SHORT_ASSIGN NULL
 math_assign:   value MATH_OPERATOR value
 inc_dec: value INC_DEC_OP
 
@@ -93,6 +104,7 @@ inc_dec: value INC_DEC_OP
 
 array_method:    UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
 array_assign:    UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
+clear_arr:       UNQUOTED_VALUE "[]" SHORT_ASSIGN NULL
 array_check:     value "in" UNQUOTED_VALUE "[]"
 array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
 array_size:      UNQUOTED_VALUE "[].size()"
@@ -119,6 +131,7 @@ block:         ":" comment? _NL _INDENT (_NL | item)* _DEDENT
 generic_block: UNQUOTED_VALUE "()"? block
 comment:       COMMENT
 var_check:     value COMP_OPERATOR value
+null_check:    value COMP_OPERATOR NULL
 operator:      "=" | COMP_OPERATOR_VANILLA
 
 # =============================================================================
@@ -130,6 +143,7 @@ COMP_OPERATOR_VANILLA: ">" | "<" | ">=" | "<="
 SHORT_ASSIGN.2:        "<-"
 MATH_OPERATOR.2:       "+=" | "-=" | "*=" | "/="
 INC_DEC_OP.2:          "++" | "--"
+NULL:                  "null"
 NOT_OP:                "not"
 AND_OP:                "and"
 OR_OP:                 "or"

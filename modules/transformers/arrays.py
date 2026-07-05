@@ -35,11 +35,27 @@ class ArraysMixin:
         if isinstance(val, tuple) and val[0] == "COUNTRY_TAG":
             val = val[1]
 
+        # A leading '_' marks a temp array. In HoI4 "temp" is decided by the
+        # command, not the name, so every operation on a '_' array must use the
+        # temp variant — otherwise add/remove hit a persistent array while clear
+        # hits a temp one, silently targeting two different arrays.
+        is_temp = arr.startswith("_")
+
         if method == "add":
-            return ("ASSIGN", "add_to_array", "=", ("BLOCK", [("ASSIGN", arr, "=", val)]))
+            cmd = "add_to_temp_array" if is_temp else "add_to_array"
+            return ("ASSIGN", cmd, "=", ("BLOCK", [("ASSIGN", arr, "=", val)]))
         elif method == "remove":
-            return ("ASSIGN", "remove_from_array", "=", ("BLOCK", [("ASSIGN", arr, "=", val)]))
+            cmd = "remove_from_temp_array" if is_temp else "remove_from_array"
+            return ("ASSIGN", cmd, "=", ("BLOCK", [("ASSIGN", arr, "=", val)]))
         elif method == "clear":
-            return ("ASSIGN", "clear_array", "=", arr)
+            cmd = "clear_temp_array" if is_temp else "clear_array"
+            return ("ASSIGN", cmd, "=", arr)
         else:
             raise ValueError(f"Compilation Error: Unknown array method '.{method}()'")
+
+    # Clearing an array: arr[] <- null
+    # Temp arrays (leading '_') map to clear_temp_array, which HoI4 does provide.
+    def clear_arr(self, items):
+        arr = str(items[0])
+        cmd = "clear_temp_array" if arr.startswith("_") else "clear_array"
+        return ("ASSIGN", cmd, "=", arr)

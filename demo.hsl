@@ -13,11 +13,15 @@ current_year -= 100
 
 # If Statement
 if current_year > 2025:
-  log("Value of current_year ([?current_year]) is MORE then 2025")
+  log("Value of `current_year` ([?current_year]) is MORE then 2025")
 elif current_year < 2025:
-  log("Value of current_year ([?current_year]) is LESS then 2025")
+  log("Value of `current_year` ([?current_year]) is LESS then 2025")
 else:
-  log("Value of current_year ([?current_year]) is EQUAL 2025")
+  log("Value of `current_year` ([?current_year]) is EQUAL 2025")
+
+current_year <- null
+if current_year == null:
+  log("Variable `current_year` has been removed from memory")
 
 # Boolean Operators
 if (current_year >= 1939 and current_year < 1945) or current_year == 1945:

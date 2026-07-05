@@ -15,6 +15,18 @@ class AssignmentsMixin:
         # For regular variables, keep the old logic
         return ("ASSIGN", "set_variable", "=", ("BLOCK", [("ASSIGN", var_name, "=", var_value)]))
 
+    # Transform: x <- null  ==>  clear_variable = x
+    # HoI4 has no clear_temp_variable, so clearing a temp (leading '_') is an error.
+    def clear_var(self, items):
+        var_name = str(items[0])
+        if var_name.startswith("_"):
+            raise ValueError(
+                f"Cannot clear temp variable '{var_name}': "
+                f"HoI4 has no 'clear_temp_variable' command. "
+                f"Temp variables are dropped automatically at the end of their effect scope."
+            )
+        return ("ASSIGN", "clear_variable", "=", var_name)
+
     def math_assign(self, items):
         var_name = str(items[0])
         op = str(items[1])
