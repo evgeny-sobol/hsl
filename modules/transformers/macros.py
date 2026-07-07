@@ -13,6 +13,21 @@ class MacrosMixin:
             params = []
             block_ast = items[1]
 
+        # `params` is a list of (name, default) tuples; default is None when the
+        # parameter is required. Enforce Python-style ordering: once a parameter
+        # has a default, every parameter after it must have one too — otherwise
+        # filling missing trailing args from defaults would be ambiguous.
+        seen_default = False
+        for name, default in params:
+            if default is None:
+                if seen_default:
+                    raise ValueError(
+                        f"Error: Macro '{macro_name}': required parameter '{name}' "
+                        f"cannot follow a parameter with a default value."
+                    )
+            else:
+                seen_default = True
+
         # Store both parameters and the body block
         self.macros[macro_name] = {
             "params": params,
@@ -35,22 +50,43 @@ class MacrosMixin:
         if not macro_data:
             raise ValueError(f"Error: Macro '{macro_name}' is not found in the library!")
 
-        params = macro_data["params"]
+        params = macro_data["params"]      # list of (name, default) tuples
         body = macro_data["body"]
 
-        # Validation
-        if len(args) != len(params):
-            raise ValueError(f"Error: Macro '{macro_name}' expects {len(params)} arguments, but got {len(args)}!")
+        param_names = [p[0] for p in params]
+        defaults    = [p[1] for p in params]
+        required    = sum(1 for d in defaults if d is None)  # defaults are trailing
+
+        # Validation: allow anywhere from `required` up to len(params) arguments.
+        if not (required <= len(args) <= len(params)):
+            if required == len(params):
+                expected = f"{len(params)}"
+            else:
+                expected = f"{required} to {len(params)}"
+            raise ValueError(
+                f"Error: Macro '{macro_name}' expects {expected} arguments, "
+                f"but got {len(args)}!"
+            )
+
+        # Fill the missing trailing arguments from their defaults.
+        effective_args = list(args) + defaults[len(args):]
 
         # Create a mapping dictionary: {'country': 'SWE', 'amount': '50'}
-        param_map = dict(zip(params, args))
+        param_map = dict(zip(param_names, effective_args))
 
         # Return a deep-copied AST with all variables replaced!
         return self._replace_args_in_ast(body, param_map)
 
-    # Helper to unpack parameters
+    # One parameter: name with an optional default value.
+    # Returns (name, default) where default is None when absent.
+    def macro_param(self, items):
+        name = str(items[0])
+        default = items[1] if len(items) > 1 else None
+        return (name, default)
+
+    # Helper to unpack parameters — a list of (name, default) tuples.
     def macro_params(self, items):
-        return [str(item) for item in items]
+        return list(items)
 
     # Helper to unpack arguments
     def macro_args(self, items):

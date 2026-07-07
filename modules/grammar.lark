@@ -8,6 +8,7 @@ start: (_NL | item)*
      | elif_statement
      | else_statement
      | linq_statement
+     | array_loop
      | macro_def
      | macro_call       _NL
      | func_call        _NL
@@ -17,12 +18,15 @@ start: (_NL | item)*
      | math_assign      _NL
      | inc_dec          _NL
      | array_method     _NL
+     | array_minmax     _NL
      | array_assign     _NL
      | var_check        _NL
      | not_statement    _NL
+     | pass_statement   _NL
      | clear_var        _NL
      | clear_arr        _NL
      | null_check       _NL
+     | array_null_check _NL
      | comment          _NL
      | generic_block
 
@@ -49,6 +53,7 @@ condition:     conj_element (OR_OP conj_element)*
           |    null_check
           |    array_check
           |    array_not_check
+          |    array_null_check
           |    assignment
           |    value
           |    "(" condition ")"
@@ -57,6 +62,10 @@ condition:     conj_element (OR_OP conj_element)*
 # a macro body). Reuses cond_atom + the logical_not handler, so it expands to
 # the same NOT = { ... } block that `NOT::trigger()` produced.
 not_statement: NOT_OP cond_atom -> logical_not
+
+# Python-style no-op. Produces nothing; it exists so an indentation block
+# can be syntactically non-empty (e.g. an if-branch that does nothing).
+pass_statement: "pass"
 
 # =============================================================================
 # FUNCTIONS & CALLS
@@ -72,21 +81,26 @@ scoped_func_call: UNQUOTED_VALUE "::" UNQUOTED_VALUE "(" [value] ")"
 # Lark drops literal commas (",") because they are anonymous terminals
 macro_def:    "macro" UNQUOTED_VALUE "(" macro_params? ")" block _NL?
 macro_call:   MACRO_NAME "(" macro_args? ")"
-macro_params: UNQUOTED_VALUE ("," UNQUOTED_VALUE)*
+macro_params: macro_param ("," macro_param)*
+macro_param:  UNQUOTED_VALUE ("=" value)?
 macro_args:   value ("," value)*
 
 # =============================================================================
 # LINQ
 # =============================================================================
 
-linq_statement.2: "for" UNQUOTED_VALUE "()" block
-                | "for" UNQUOTED_VALUE "()" _NL* "." _NL* "which" "(" condition ")" block
-                | "for" loop_binding UNQUOTED_VALUE "()" block
-                | "for" loop_binding UNQUOTED_VALUE "()" _NL* "." _NL* "which" "(" condition ")" block
+linq_statement.2: "for" UNQUOTED_VALUE "(" ")" block
+                | "for" UNQUOTED_VALUE "(" ")" _NL* "." _NL* "which" "(" condition ")" block
+                | "for" loop_binding UNQUOTED_VALUE "(" ")" block
+                | "for" loop_binding UNQUOTED_VALUE "(" ")" _NL* "." _NL* "which" "(" condition ")" block
 
 # Python-style loop head: `cty in`. Emits a SCOPE_DEF marker that binds the
 # loop variable; the bare (bindingless) forms above just iterate.
 loop_binding: UNQUOTED_VALUE "in"
+
+# Array iteration: `for value, index in arr[]:` -> for_each_loop.
+# Distinct from the scope loops above by the ',' after the first variable.
+array_loop.2: "for" UNQUOTED_VALUE "," UNQUOTED_VALUE "in" UNQUOTED_VALUE "[]" block
 
 # =============================================================================
 # ASSIGNMENTS
@@ -103,8 +117,10 @@ inc_dec: value INC_DEC_OP
 # =============================================================================
 
 array_method:    UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
+array_minmax:    UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" value "," value ")"
 array_assign:    UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
 clear_arr:       UNQUOTED_VALUE "[]" SHORT_ASSIGN NULL
+array_null_check: UNQUOTED_VALUE "[]" COMP_OPERATOR NULL
 array_check:     value "in" UNQUOTED_VALUE "[]"
 array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
 array_size:      UNQUOTED_VALUE "[].size()"
@@ -128,7 +144,7 @@ string: ESCAPED_STRING
 
 block:         ":" comment? _NL _INDENT (_NL | item)* _DEDENT
      |         "=" "{" (_NL | item)* "}"
-generic_block: UNQUOTED_VALUE "()"? block
+generic_block: UNQUOTED_VALUE ("(" ")")? block
 comment:       COMMENT
 var_check:     value COMP_OPERATOR value
 null_check:    value COMP_OPERATOR NULL
@@ -153,9 +169,9 @@ OR_OP:                 "or"
 # =============================================================================
 
 # Digits with optional single underscores as separators (e.g. 1_000_000)
-UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.]+/
+UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.@]+/
 COUNTRY_TAG:    "$" /[A-Z0-9_]+/
-MACRO_NAME.2:   "@" /[a-zA-Z0-9_]+/
+MACRO_NAME.2:   "$" /[a-z][a-zA-Z0-9_]*/
 COMMENT:        /#[^\n]*/
 
 %import common.ESCAPED_STRING

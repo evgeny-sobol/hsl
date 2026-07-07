@@ -10,6 +10,10 @@ class BlocksMixin:
         processed_items = []
 
         for item in items:
+            # `pass` and other no-ops transform to None → drop them, so an
+            # empty (pass-only) block yields a clean, effect-less body.
+            if item is None:
+                continue
             # A bare word inside a block is a standalone flag/trigger → "= yes"
             if isinstance(item, str):
                 processed_items.append(("ASSIGN", item, "=", "yes"))

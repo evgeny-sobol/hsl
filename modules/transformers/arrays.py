@@ -59,3 +59,37 @@ class ArraysMixin:
         arr = str(items[0])
         cmd = "clear_temp_array" if arr.startswith("_") else "clear_array"
         return ("ASSIGN", cmd, "=", arr)
+
+    # Two-argument array search: arr[].min(value, index) / arr[].max(value, index)
+    #   .min -> find_lowest_in_array,  .max -> find_highest_in_array
+    # `value` and `index` are the output variables the engine writes into.
+    def array_minmax(self, items):
+        arr    = str(items[0])
+        method = str(items[1])
+        value  = items[2]
+        index  = items[3]
+
+        # Unwrap COUNTRY_TAG sentinels defensively (normally these are var names).
+        if isinstance(value, tuple) and value[0] == "COUNTRY_TAG":
+            value = value[1]
+        if isinstance(index, tuple) and index[0] == "COUNTRY_TAG":
+            index = index[1]
+
+        if method == "min":
+            cmd = "find_lowest_in_array"
+        elif method == "max":
+            cmd = "find_highest_in_array"
+        else:
+            raise ValueError(
+                f"Unknown two-argument array method '.{method}()'; expected 'min' or 'max'."
+            )
+
+        block_items = [
+            ("ASSIGN", "array", "=", arr),
+            ("ASSIGN", "value", "=", value),
+        ]
+        # '_' is a throwaway index placeholder — omit the index line entirely.
+        if str(index) != "_":
+            block_items.append(("ASSIGN", "index", "=", index))
+
+        return ("ASSIGN", cmd, "=", ("BLOCK", block_items))

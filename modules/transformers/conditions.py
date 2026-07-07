@@ -103,6 +103,23 @@ class ConditionsMixin:
 
         raise ValueError(f"Operator '{op_str}' is not valid with null; use '==' or '!='.")
 
+    # ARRAY EXISTENCE CHECK: arr[] == null  /  arr[] != null
+    #   arr[] == null  ==>  check_variable = { arr^num = 0 }   (empty)
+    #   arr[] != null  ==>  check_variable = { arr^num > 0 }   (has elements)
+    def array_null_check(self, items):
+        arr = str(items[0])
+        op_str = str(items[1])
+        count = f"{arr}^num"
+
+        if op_str == "==":
+            return ("ASSIGN", "check_variable", "=", ("BLOCK", [("ASSIGN", count, "=", 0)]))
+        elif op_str == "!=":
+            return ("ASSIGN", "check_variable", "=", ("BLOCK", [("ASSIGN", count, ">", 0)]))
+
+        raise ValueError(
+            f"Operator '{op_str}' is not valid for an array null-check; use '==' or '!='."
+        )
+
     # Check if a value exists in an array: val in arr_name[]
     def array_check(self, items):
         val = items[0]
