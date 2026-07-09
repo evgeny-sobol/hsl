@@ -135,12 +135,20 @@ array_access:    UNQUOTED_VALUE "[" value "]"
 # VALUES
 # =============================================================================
 
-?value: array_size
-      | array_access
-      | macro_call
-      | COUNTRY_TAG    -> country_tag
-      | UNQUOTED_VALUE -> unquoted_value
-      | string
+?value: simple_value
+      | arith_expr
+
+?simple_value: array_size
+             | array_access
+             | macro_call
+             | COUNTRY_TAG    -> country_tag
+             | UNQUOTED_VALUE -> unquoted_value
+             | string
+
+# Inline arithmetic (no nesting): `a + b`, `x * 2`. Lifted into temp vars
+# by a post-pass. Operands are simple_value, so chaining (`a + b + c`)
+# is intentionally not accepted.
+arith_expr: simple_value ARITH_OP simple_value
 
 string: ESCAPED_STRING
 
@@ -173,6 +181,7 @@ COMP_OPERATOR:         "==" | "!=" | ">" | "<" | ">=" | "<="
 COMP_OPERATOR_VANILLA: ">" | "<" | ">=" | "<="
 SHORT_ASSIGN.2:        "<-"
 MATH_OPERATOR.2:       "+=" | "-=" | "*=" | "/="
+ARITH_OP:              "+" | "-" | "*" | "/"
 INC_DEC_OP.2:          "++" | "--"
 NULL:                  "null"
 NOT_OP:                "not"

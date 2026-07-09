@@ -3,15 +3,19 @@ class FunctionsMixin:
         func_name = str(items[0])
 
         if len(items) > 1 and items[1] is not None:
-            # Convert argument to string for easier manipulation
-            arg = str(items[1])
+            arg = items[1]
 
-            # REPLACEMENT MAGIC
-            # Map standard true/false values to Clausewitz yes/no primitives
-            if arg == "true":
-                arg = "yes"
-            elif arg == "false":
-                arg = "no"
+            # Unwrap a COUNTRY_TAG sentinel to its bare tag.
+            if isinstance(arg, tuple) and arg and arg[0] == "COUNTRY_TAG":
+                arg = arg[1]
+            # Map standard true/false to Clausewitz yes/no. Only strings are
+            # touched — a non-string arg (an int, or an ("ARITH", ...) marker the
+            # post-pass will lift) must pass through untouched, NOT be str()'d.
+            elif isinstance(arg, str):
+                if arg == "true":
+                    arg = "yes"
+                elif arg == "false":
+                    arg = "no"
 
             return ("ASSIGN", func_name, "=", arg)
         else:
@@ -23,5 +27,7 @@ class FunctionsMixin:
         func  = str(items[1])   # "can_ROOT_get_wargoal_on_THIS"
         arg   = items[2] if len(items) > 2 else None
 
-        inner_val = "yes" if arg is None else str(arg)
+        # Preserve non-string args (int / ("ARITH", ...) marker); default the
+        # empty case to "yes".
+        inner_val = "yes" if arg is None else arg
         return ("ASSIGN", scope, "=", ("BLOCK", [("ASSIGN", func, "=", inner_val)]))
