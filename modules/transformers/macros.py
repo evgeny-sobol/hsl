@@ -28,11 +28,24 @@ class MacrosMixin:
             else:
                 seen_default = True
 
-        # Store both parameters and the body block
-        self.macros[macro_name] = {
-            "params": params,
-            "body": block_ast[1]
-        }
+        # Store both parameters and the body block.
+        # A body that is exactly one bare value expression (("EXPR", v)) marks a
+        # *value macro*: calling it in a value position substitutes that
+        # expression. Anything else is an ordinary *operator macro* whose body is
+        # a list of statements spliced in at the call site.
+        body_items = block_ast[1]
+        if len(body_items) == 1 and isinstance(body_items[0], tuple) and body_items[0][0] == "EXPR":
+            self.macros[macro_name] = {
+                "params": params,
+                "body": body_items[0][1],   # the value expression itself
+                "is_value": True,
+            }
+        else:
+            self.macros[macro_name] = {
+                "params": params,
+                "body": body_items,
+                "is_value": False,
+            }
         return None
 
     # Macro Call
@@ -114,7 +127,18 @@ class MacrosMixin:
             return [self._replace_args_in_ast(child, param_map) for child in node]
 
         elif isinstance(node, tuple):
-            # Recursively process tuples
+            # For an ASSIGN, the op slot (index 2) may receive an operator passed
+            # as a quoted string (e.g. ">"); strip the surrounding quotes so it
+            # lands in the operator position literally. Normal ops ("=", ">") are
+            # never quoted, so this is a no-op for them.
+            if node[0] == "ASSIGN" and len(node) == 4:
+                left  = self._replace_args_in_ast(node[1], param_map)
+                op    = self._replace_args_in_ast(node[2], param_map)
+                right = self._replace_args_in_ast(node[3], param_map)
+                if isinstance(op, str) and len(op) >= 2 and op[0] == '"' and op[-1] == '"':
+                    op = op[1:-1]
+                return ("ASSIGN", left, op, right)
+            # Recursively process other tuples
             return tuple(self._replace_args_in_ast(child, param_map) for child in node)
 
         else:

@@ -10,7 +10,8 @@ start: (_NL | item)*
      | linq_statement
      | array_loop
      | macro_def
-     | macro_call       _NL
+     | raw_block
+     | expr_statement    _NL
      | func_call        _NL
      | scoped_func_call _NL
      | assignment       _NL
@@ -48,7 +49,6 @@ condition:     conj_element (OR_OP conj_element)*
             |  cond_atom
 ?cond_atom:    func_call
           |    scoped_func_call
-          |    macro_call
           |    var_check
           |    null_check
           |    array_check
@@ -66,6 +66,11 @@ not_statement: NOT_OP cond_atom -> logical_not
 # Python-style no-op. Produces nothing; it exists so an indentation block
 # can be syntactically non-empty (e.g. an if-branch that does nothing).
 pass_statement: "pass"
+
+# A bare value on its own line. Its main purpose is the body of a
+# value-macro (`macro f(): some_value`); an operator-macro call used as a
+# statement also lands here and passes its statement list straight through.
+expr_statement: value
 
 # =============================================================================
 # FUNCTIONS & CALLS
@@ -132,6 +137,7 @@ array_access:    UNQUOTED_VALUE "[" value "]"
 
 ?value: array_size
       | array_access
+      | macro_call
       | COUNTRY_TAG    -> country_tag
       | UNQUOTED_VALUE -> unquoted_value
       | string
@@ -145,6 +151,15 @@ string: ESCAPED_STRING
 block:         ":" comment? _NL _INDENT (_NL | item)* _DEDENT
      |         "=" "{" (_NL | item)* "}"
 generic_block: UNQUOTED_VALUE ("(" ")")? block
+
+# Raw (verbatim) block: name(): { ... }. Its lines are emitted literally,
+# with no check_variable / "= yes" sugar — an escape hatch for vanilla
+# trigger blocks like has_opinion. The middle token of a raw line may be an
+# operator OR a bare identifier (a macro operator-placeholder).
+raw_block: UNQUOTED_VALUE "(" ")" ":" "{" comment? _NL _INDENT (_NL | raw_line _NL | comment _NL)* _DEDENT "}"
+raw_line:  value "=" value            -> raw_line_op
+        |  value COMP_OPERATOR value   -> raw_line_op
+        |  value UNQUOTED_VALUE value   -> raw_line_op
 comment:       COMMENT
 var_check:     value COMP_OPERATOR value
 null_check:    value COMP_OPERATOR NULL
