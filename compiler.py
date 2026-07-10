@@ -79,6 +79,14 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
                 return "\n"
             return f"{spacing}{comment_text}\n"
 
+        if node_type == "RAW_INLINE":
+            # Verbatim single-line block: `name = { body }`. body is emitted as
+            # given (already normalized), only scope vars resolved to THIS/PREV.
+            _, name, body = ast
+            name = resolve_scopes(name, scope_stack)
+            body = resolve_scopes(body, scope_stack)
+            return f"{spacing}{name} = {{ {body} }}\n"
+
         if node_type == "ASSIGN":
             _, left, op, right = ast
 
@@ -423,3 +431,5 @@ if __name__ == "__main__":
     vanilla_root = positional[1] if len(positional) > 1 else None
 
     compile_folder(target_dir, vanilla_root, force=force)
+
+

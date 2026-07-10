@@ -141,6 +141,7 @@ array_access:    UNQUOTED_VALUE "[" value "]"
 ?simple_value: array_size
              | array_access
              | macro_call
+             | PREFIXED_REF   -> prefixed_value
              | COUNTRY_TAG    -> country_tag
              | UNQUOTED_VALUE -> unquoted_value
              | string
@@ -164,7 +165,8 @@ generic_block: UNQUOTED_VALUE ("(" ")")? block
 # with no check_variable / "= yes" sugar — an escape hatch for vanilla
 # trigger blocks like has_opinion. The middle token of a raw line may be an
 # operator OR a bare identifier (a macro operator-placeholder).
-raw_block: UNQUOTED_VALUE "(" ")" ":" "{" comment? _NL _INDENT (_NL | raw_line _NL | comment _NL)* _DEDENT "}"
+raw_block: UNQUOTED_VALUE "(" ")" ":" "{" comment? _NL _INDENT (_NL | raw_line _NL | comment _NL)* _DEDENT "}"  -> raw_block
+         | UNQUOTED_VALUE "(" ")" ":" INLINE_RAW                                                              -> raw_block_inline
 raw_line:  value "=" value            -> raw_line_op
         |  value COMP_OPERATOR value   -> raw_line_op
         |  value UNQUOTED_VALUE value   -> raw_line_op
@@ -183,6 +185,14 @@ SHORT_ASSIGN.2:        "<-"
 MATH_OPERATOR.2:       "+=" | "-=" | "*=" | "/="
 ARITH_OP:              "+" | "-" | "*" | "/"
 INC_DEC_OP.2:          "++" | "--"
+# Inline raw-block body: `{ ... }` with no newline or nested braces inside.
+# Priority .2 so the whole brace span is captured as one token on single-line
+# raw blocks, instead of matching the literal "{" of the multi-line form.
+INLINE_RAW.2:          /\{[^{}\n]*\}/
+# `var:NAME` / `token:NAME` matched as ONE token (prefix glued to ':'), so a
+# bare `var` / `token` used as a key or function name (var(...), var=honor_stat)
+# is NOT captured and stays an ordinary identifier.
+PREFIXED_REF.3:        /(var|token):[A-Za-z0-9_.@]+/
 NULL:                  "null"
 NOT_OP:                "not"
 AND_OP:                "and"
@@ -219,3 +229,5 @@ _LPAR: "("
 _RPAR: ")"
 _LSQB: "["
 _RSQB: "]"
+
+
