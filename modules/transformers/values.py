@@ -30,9 +30,10 @@ class ValuesMixin:
     def country_tag(self, items):
         return ("COUNTRY_TAG", str(items[0])[1:]) # e.g. ("COUNTRY_TAG", "USA")
 
-    # var:NAME / token:NAME arrives as one token (e.g. "var:ROOT.rival_ideology")
-    # -> returned verbatim as a plain string so it flows through assignment RHS,
-    # call args and check_variable/has_government like any other scalar.
+    # var:NAME / token:NAME / mtth:NAME arrives as one token (e.g.
+    # "var:ROOT.rival_ideology") -> returned verbatim as a plain string so it
+    # flows through assignment RHS, call args and check_variable/has_government
+    # like any other scalar.
     def prefixed_value(self, items):
         return str(items[0])
 

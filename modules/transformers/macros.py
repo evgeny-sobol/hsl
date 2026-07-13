@@ -138,8 +138,20 @@ class MacrosMixin:
                 if isinstance(op, str) and len(op) >= 2 and op[0] == '"' and op[-1] == '"':
                     op = op[1:-1]
                 return ("ASSIGN", left, op, right)
+            # A raw statement trigger (`raw field op val`) is emitted verbatim,
+            # and HoI4 wants bare tokens (date < 1939.1.1, not "date" < "1939.1.1").
+            # Args must be quoted at the call site so tokens like 1939.1.1 survive
+            # parsing; strip the surrounding quotes off every slot here.
+            if node[0] == "RAW_ASSIGN" and len(node) == 4:
+                parts = [self._replace_args_in_ast(node[i], param_map) for i in (1, 2, 3)]
+                parts = [p[1:-1] if isinstance(p, str) and len(p) >= 2
+                         and p[0] == '"' and p[-1] == '"' else p
+                         for p in parts]
+                return ("RAW_ASSIGN", parts[0], parts[1], parts[2])
             # Recursively process other tuples
             return tuple(self._replace_args_in_ast(child, param_map) for child in node)
 
         else:
             return node
+
+

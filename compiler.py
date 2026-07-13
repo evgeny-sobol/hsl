@@ -87,6 +87,19 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
             body = resolve_scopes(body, scope_stack)
             return f"{spacing}{name} = {{ {body} }}\n"
 
+        if node_type == "RAW_BARE":
+            # A single verbatim token on its own line (e.g. a focus id in an
+            # ai_national_focuses list). No "= yes", just the token.
+            val = resolve_scopes(ast[1], scope_stack)
+            return f"{spacing}{val}\n"
+
+        if node_type == "RAW_ASSIGN":
+            # Verbatim trigger line `left op right`, no sugar (e.g. date < 1939.1.1).
+            _, left, op, right = ast
+            left  = resolve_scopes(left, scope_stack) if isinstance(left, str) else left
+            right = resolve_scopes(right, scope_stack) if isinstance(right, str) else right
+            return f"{spacing}{left} {op} {right}\n"
+
         if node_type == "ASSIGN":
             _, left, op, right = ast
 

@@ -375,6 +375,157 @@ def find_injection_point(text, path, index=None):
     return line_start, content_indent
 
 
+_SL_TOKEN = re.compile(r'"[^"]*"|[{}]|[^\s{}]+')
+
+
+def _reflow_single_line_body(inner, base_indent):
+    toks = _SL_TOKEN.findall(inner)
+    if not toks:
+        return None
+    lines = []
+    indent = 1
+    cur = []
+
+    def flush():
+        if cur:
+            lines.append(base_indent + ('\t' * indent) + ' '.join(cur))
+            cur.clear()
+
+    for t in toks:
+        if t == '{':
+            cur.append('{')
+            flush()
+            indent += 1
+        elif t == '}':
+            flush()
+            indent -= 1
+            lines.append(base_indent + ('\t' * indent) + '}')
+        else:
+            cur.append(t)
+            if len(cur) == 3:
+                flush()
+    flush()
+    return '\n'.join(lines)
+
+
+def expand_single_line_blocks(text, name):
+    out = []
+    i = 0
+    n = len(text)
+    nlen = len(name)
+    while i < n:
+        c = text[i]
+        if c == '#':
+            j = _skip_comment(text, i)
+            out.append(text[i:j]); i = j; continue
+        if c == '"':
+            j = _skip_string(text, i)
+            out.append(text[i:j]); i = j; continue
+        if not _is_word_char(text, i - 1) \
+                and text.startswith(name, i) \
+                and not _is_word_char(text, i + nlen):
+            j = i + nlen
+            k = j
+            while k < n and text[k] in ' \t\r\n':
+                k += 1
+            if k < n and text[k] == '=':
+                k += 1
+                while k < n and text[k] in ' \t\r\n':
+                    k += 1
+                if k < n and text[k] == '{':
+                    open_pos = k + 1
+                    close_pos = _match_closing_brace(text, open_pos)
+                    block_text = text[open_pos:close_pos]
+                    if '\n' not in block_text:
+                        line_start = text.rfind('\n', 0, i) + 1
+                        base_indent = text[line_start:i]
+                        body = _reflow_single_line_body(block_text.strip(), base_indent)
+                        if body is not None:
+                            out.append(f"{name} = {{\n{body}\n{base_indent}}}")
+                        else:
+                            out.append(f"{name} = {{\n{base_indent}}}")
+                        i = close_pos + 1
+                        continue
+            out.append(text[i:j]); i = j; continue
+        out.append(c); i += 1
+    return ''.join(out)
+
+
+def _collect_nav_names(node, acc):
+    for it in node.items:
+        if isinstance(it, tuple):
+            continue
+        if not it.create:
+            acc.add(it.name)
+            _collect_nav_names(it, acc)
+
+
+def _normalize_flat_aborts(text):
+    """Wrap any flat `abort = { ... }` (a top-level plan block whose abort has no
+    direct OR child) into `abort = { OR = { ... } }`, so an include that
+    navigates abort:/OR: can add a branch. OR-form and missing aborts are left
+    as-is. Operates on an in-memory copy only. Applied bottom-up so offsets stay
+    valid."""
+    edits = []
+    for name, o, c in _iter_top_level_blocks(text):
+        ablocks = list(_iter_named_blocks(text, "abort", o, c))
+        if not ablocks:
+            continue
+        ao, ac = ablocks[0]
+        if list(_iter_named_blocks(text, "OR", ao, ac)):
+            continue
+        inner = text[ao:ac]
+        astart = text.rfind("abort", o, ao)
+        line_start = text.rfind("\n", 0, astart) + 1
+        base = text[line_start:astart]
+        inner_lines = inner.strip("\n").split("\n")
+        wrapped = "\n".join(
+            (base + "\t\t" + l.strip()) if l.strip() else ""
+            for l in inner_lines
+        ).strip("\n")
+        replacement = f"abort = {{\n{base}\tOR = {{\n{wrapped}\n{base}\t}}\n{base}}}"
+        edits.append((astart, ac + 1, replacement))
+    for s, e, r in sorted(edits, key=lambda t: t[0], reverse=True):
+        text = text[:s] + r + text[e:]
+    return text
+
+
+def _iter_top_level_blocks(text):
+    i = 0
+    n = len(text)
+    depth = 0
+    while i < n:
+        c = text[i]
+        if c == "#":
+            i = _skip_comment(text, i); continue
+        if c == '"':
+            i = _skip_string(text, i); continue
+        if c == "{":
+            depth += 1; i += 1; continue
+        if c == "}":
+            depth -= 1; i += 1; continue
+        if depth == 0 and (c in _WORD_CHARS) and not _is_word_char(text, i - 1):
+            j = i
+            while j < n and text[j] in _WORD_CHARS:
+                j += 1
+            k = j
+            while k < n and text[k] in " \t\r\n":
+                k += 1
+            if k < n and text[k] == "=":
+                k += 1
+                while k < n and text[k] in " \t\r\n":
+                    k += 1
+                if k < n and text[k] == "{":
+                    open_pos = k + 1
+                    close_pos = _match_closing_brace(text, open_pos)
+                    yield (text[i:j], open_pos, close_pos)
+                    i = close_pos + 1
+                    continue
+            i = j
+            continue
+        i += 1
+
+
 # =============================================================================
 # SPLICING
 # =============================================================================
@@ -443,15 +594,20 @@ def _render_local_hsl(items, indent=0):
 
 
 def _resolve_nav(vanilla_text, nav_path, index):
-    """Where to inject for a navigate path. Empty path => append at file scope."""
+    """Where to inject for a navigate path.
+
+    Empty path => file scope. File-scope content (e.g. top-level `@CONSTANT = N`
+    declarations) is injected at the START of the file, since HoI4 constants read
+    best when declared up top. The third return value is a placement flag:
+      'leading'  - prepend a newline before the fragment (join onto prior text);
+      'trailing' - append a newline after the fragment (separate it from the text
+                   that follows, used for the start-of-file case);
+      None       - no extra newline needed."""
     if not nav_path:
-        end = len(vanilla_text)
-        # Ensure we land at the start of a fresh line.
-        if vanilla_text and not vanilla_text.endswith('\n'):
-            return end, '', True   # needs a leading newline
-        return end, '', False
+        # Inject at column 0, before all existing content.
+        return 0, '', 'trailing'
     insert_pos, content_indent = find_injection_point(vanilla_text, nav_path, index)
-    return insert_pos, content_indent, False
+    return insert_pos, content_indent, None
 
 
 def _collect(node, nav_path, vanilla_text, compile_fragment, injections, index):
@@ -466,11 +622,13 @@ def _collect(node, nav_path, vanilla_text, compile_fragment, injections, index):
             nav_children.append(it)
 
     if local:
-        insert_pos, content_indent, need_nl = _resolve_nav(vanilla_text, nav_path, index)
+        insert_pos, content_indent, nl = _resolve_nav(vanilla_text, nav_path, index)
         fragment = compile_fragment(_render_local_hsl(local))
         reindented = reindent_fragment(fragment, content_indent)
-        if need_nl:
+        if nl == 'leading':
             reindented = '\n' + reindented
+        elif nl == 'trailing':
+            reindented = reindented + '\n'
         injections.append((insert_pos, reindented))
 
     for child in nav_children:
@@ -491,7 +649,21 @@ def transpile_include_source(vanilla_text, include_source, compile_fragment):
     Returns the new .txt text.
     """
     root = parse_include(include_source)
+
+    nav_names = set()
+    _collect_nav_names(root, nav_names)
+    for name in nav_names:
+        vanilla_text = expand_single_line_blocks(vanilla_text, name)
+
+    # If the include navigates into an abort block, flat aborts must be wrapped
+    # in OR so the abort:/OR: path resolves.
+    if "abort" in nav_names:
+        vanilla_text = _normalize_flat_aborts(vanilla_text)
+
     index = _VanillaIndex(vanilla_text)
     injections = []
     _collect(root, [], vanilla_text, compile_fragment, injections, index)
     return splice_injections(vanilla_text, injections)
+
+
+

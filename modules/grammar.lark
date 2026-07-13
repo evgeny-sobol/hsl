@@ -11,14 +11,17 @@ start: (_NL | item)*
      | array_loop
      | macro_def
      | raw_block
+     | raw_stmt          _NL
      | expr_statement    _NL
      | func_call        _NL
      | scoped_func_call _NL
+     | prefixed_scoped_call _NL
      | assignment       _NL
      | short_assign     _NL
      | math_assign      _NL
      | inc_dec          _NL
      | array_method     _NL
+     | bracket_list      _NL
      | array_minmax     _NL
      | array_assign     _NL
      | var_check        _NL
@@ -30,6 +33,7 @@ start: (_NL | item)*
      | array_null_check _NL
      | comment          _NL
      | generic_block
+     | prefixed_block
 
 # =============================================================================
 # CONTROL FLOW
@@ -49,6 +53,7 @@ condition:     conj_element (OR_OP conj_element)*
             |  cond_atom
 ?cond_atom:    func_call
           |    scoped_func_call
+          |    bracket_list
           |    var_check
           |    null_check
           |    array_check
@@ -78,6 +83,13 @@ expr_statement: value
 
 func_call:        UNQUOTED_VALUE "(" [value] ")"
 scoped_func_call: UNQUOTED_VALUE "::" UNQUOTED_VALUE "(" [value] ")"
+
+# One-line form of a prefixed scope + trigger:
+#   var:NAME[i]::func(arg)  ->  var:NAME^i = { func = arg }
+#   var:NAME::func(arg)     ->  var:NAME   = { func = arg }
+# The '::' separator mirrors scoped_func_call; the left side is a PREFIXED_REF
+# with an optional [index].
+prefixed_scoped_call: PREFIXED_REF ("[" value "]")? "::" UNQUOTED_VALUE "(" [value] ")"
 
 # =============================================================================
 # MACROS
@@ -131,6 +143,11 @@ array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
 array_size:      UNQUOTED_VALUE "[].size()"
 array_access:    UNQUOTED_VALUE "[" value "]"
 
+# Bracket list-trigger: `name[a, b, c]` -> `name = { a b c }`. For engine
+# triggers that take a bare list block (e.g. owns_any_state_of). Requires TWO+
+# elements (the `("," value)+`), so a single `name[i]` stays array_access.
+bracket_list: UNQUOTED_VALUE "[" value ("," value)+ "]"
+
 # =============================================================================
 # VALUES
 # =============================================================================
@@ -161,15 +178,31 @@ block:         ":" comment? _NL _INDENT (_NL | item)* _DEDENT
      |         "=" "{" (_NL | item)* "}"
 generic_block: UNQUOTED_VALUE ("(" ")")? block
 
-# Raw (verbatim) block: name(): { ... }. Its lines are emitted literally,
-# with no check_variable / "= yes" sugar — an escape hatch for vanilla
-# trigger blocks like has_opinion. The middle token of a raw line may be an
-# operator OR a bare identifier (a macro operator-placeholder).
-raw_block: UNQUOTED_VALUE "(" ")" ":" "{" comment? _NL _INDENT (_NL | raw_line _NL | comment _NL)* _DEDENT "}"  -> raw_block
-         | UNQUOTED_VALUE "(" ")" ":" INLINE_RAW                                                              -> raw_block_inline
+# A var:/token:/mtth: reference used as a SCOPE header, with an optional array
+# index: `var:NAME[i]:` -> `var:NAME^i = { ... }`. The index `[i]` maps to the
+# engine's `^i` element access; without an index it scopes the scalar ref.
+prefixed_block: PREFIXED_REF ("[" value "]")? block
+
+# Raw (verbatim) block: `raw name:` (multiline) or `raw name: { ... }` (inline).
+# Its lines are emitted literally, with no check_variable / "= yes" sugar — an
+# escape hatch for vanilla trigger blocks (has_opinion) and bare-token lists
+# (ai_national_focuses). The middle token of a raw line may be an operator OR a
+# bare identifier (a macro operator-placeholder); a lone token is emitted as-is.
+raw_block: RAW_KW UNQUOTED_VALUE ":" "{" comment? _NL _INDENT (_NL | raw_line _NL | comment _NL)* _DEDENT "}"  -> raw_block
+         | RAW_KW UNQUOTED_VALUE ":" INLINE_RAW                                                              -> raw_block_inline
 raw_line:  value "=" value            -> raw_line_op
         |  value COMP_OPERATOR value   -> raw_line_op
         |  value UNQUOTED_VALUE value   -> raw_line_op
+        |  value                        -> raw_line_bare
+
+# Bare raw trigger as a standalone statement: `raw LHS op RHS`, emitted verbatim
+# with no sugar and NO wrapping block. Distinguished from `raw name:` (block) by
+# the absence of ':'. The middle token may be a comparison operator, '=', or a
+# bare identifier (a macro operator-placeholder like `_op`). This is what powers
+# a reusable `compare(field, op, val)` macro whose body is `raw field op val`.
+raw_stmt:  RAW_KW value "=" value            -> raw_stmt_op
+        |  RAW_KW value COMP_OPERATOR value   -> raw_stmt_op
+        |  RAW_KW value UNQUOTED_VALUE value   -> raw_stmt_op
 comment:       COMMENT
 var_check:     value COMP_OPERATOR value
 null_check:    value COMP_OPERATOR NULL
@@ -189,10 +222,13 @@ INC_DEC_OP.2:          "++" | "--"
 # Priority .2 so the whole brace span is captured as one token on single-line
 # raw blocks, instead of matching the literal "{" of the multi-line form.
 INLINE_RAW.2:          /\{[^{}\n]*\}/
-# `var:NAME` / `token:NAME` matched as ONE token (prefix glued to ':'), so a
-# bare `var` / `token` used as a key or function name (var(...), var=honor_stat)
-# is NOT captured and stays an ordinary identifier.
-PREFIXED_REF.3:        /(var|token):[A-Za-z0-9_.@]+/
+# `var:NAME` / `token:NAME` / `mtth:NAME` matched as ONE token (prefix glued to
+# ':'), so a bare `var` / `token` / `mtth` used as a key or function name
+# (var(...), var=honor_stat) is NOT captured and stays an ordinary identifier.
+PREFIXED_REF.3:        /(var|token|mtth):[A-Za-z0-9_.@]+/
+# `raw` block marker. Lookahead guards the word boundary so an identifier like
+# `raw_score` or `rawdata` is NOT captured — only a standalone `raw`.
+RAW_KW.3:              /raw(?![A-Za-z0-9_])/
 NULL:                  "null"
 NOT_OP:                "not"
 AND_OP:                "and"
