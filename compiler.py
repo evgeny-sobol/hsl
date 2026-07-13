@@ -6,6 +6,66 @@ from lark.indenter import Indenter
 from modules.transformer import HslTransformer
 from modules import includes
 
+import fnmatch
+
+
+def _collect_unignore_patterns(target_folder):
+    """Gather negation patterns (lines starting with '!') from every .gitignore
+    under target_folder. Returns a list of (dir, pattern) so a pattern is matched
+    relative to the .gitignore that declares it, mirroring git's scoping."""
+    patterns = []
+    for root, _dirs, files in os.walk(target_folder):
+        if '.gitignore' not in files:
+            continue
+        try:
+            with open(os.path.join(root, '.gitignore'), 'r', encoding='utf-8-sig') as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            s = line.strip()
+            if s.startswith('!') and len(s) > 1:
+                patterns.append((root, s[1:].strip().lstrip('/')))
+    return patterns
+
+
+def _is_protected(txt_path, patterns):
+    """True if txt_path matches any '!' unignore pattern, matched both against
+    its basename and its path relative to the declaring .gitignore's directory."""
+    base = os.path.basename(txt_path)
+    for pdir, pat in patterns:
+        if fnmatch.fnmatch(base, pat):
+            return True
+        rel = os.path.relpath(txt_path, pdir).replace(os.sep, '/')
+        if fnmatch.fnmatch(rel, pat):
+            return True
+    return False
+
+
+def prune_orphan_txt(target_folder):
+    """Delete .txt files that have no sibling .hsl or .include source, unless the
+    .txt is protected by a '!' rule in a .gitignore. Returns the count removed."""
+    patterns = _collect_unignore_patterns(target_folder)
+    removed = 0
+    for root, _dirs, files in os.walk(target_folder):
+        stems = {f.rsplit('.', 1)[0] for f in files
+                 if f.endswith('.hsl') or f.endswith('.include')}
+        for f in files:
+            if not f.endswith('.txt'):
+                continue
+            if f[:-4] in stems:
+                continue
+            txt_path = os.path.join(root, f)
+            if _is_protected(txt_path, patterns):
+                continue
+            try:
+                os.remove(txt_path)
+                print(f"Removed orphan: {os.path.relpath(txt_path, target_folder)}")
+                removed += 1
+            except OSError as e:
+                print(f"  Could not remove {txt_path}: {e}")
+    return removed
+
 class HslIndenter(Indenter):
     NL_type = '_NL'
     OPEN_PAREN_types = ['_LPAR', '_LSQB']
@@ -143,6 +203,32 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
         return f"{spacing}{ast}\n"
 
     return ""
+
+# A macro call is `$name(` where name starts lowercase (COUNTRY_TAG is `$` +
+# uppercase, so `$GER(` never matches). Used to decide whether a changed .hml
+# forces a rebuild of a given source file.
+_MACRO_CALL_RE = re.compile(r'\$[a-z][a-zA-Z0-9_]*\s*\(')
+
+
+def _uses_macro(path):
+    """True if the source file contains at least one `$macro(` call."""
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return bool(_MACRO_CALL_RE.search(f.read()))
+    except OSError:
+        return False
+
+
+def _macro_floor(path, out_path, macros_mtime):
+    """Freshness floor for `path`: the newest-macro timestamp only applies when
+    the output is older than it AND the source actually calls a macro. Otherwise
+    macro changes are irrelevant to this file, so the floor is 0. The mtime gate
+    comes first so unaffected files never get re-read on clean builds."""
+    om = _mtime(out_path)
+    if om is not None and macros_mtime > om and _uses_macro(path):
+        return macros_mtime
+    return 0.0
+
 
 def _mtime(path):
     """Modification time of `path`, or None if it does not exist."""
@@ -354,9 +440,10 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
             # Print the relative path to prettify the console output
             relative_path = os.path.relpath(hsl_path, target_folder)
 
-            # Incremental build: skip if the .txt is newer than the .hsl and
-            # every macro library.
-            if not force and _is_fresh(txt_path, [hsl_path], macros_mtime):
+            # Incremental build: skip if the .txt is newer than the .hsl. A
+            # changed .hml only forces a rebuild when this file calls a macro.
+            floor = _macro_floor(hsl_path, txt_path, macros_mtime)
+            if not force and _is_fresh(txt_path, [hsl_path], floor):
                 skipped_count += 1
                 continue
 
@@ -397,10 +484,15 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
                 print("  No vanilla root provided (pass it as the 2nd argument). Skipped.")
                 continue
 
+            # A changed .hml only forces an include rebuild when the .include
+            # payload calls a macro. out_path mirrors process_include_file.
+            inc_out = os.path.splitext(include_path)[0] + ".txt"
+            inc_floor = _macro_floor(include_path, inc_out, macros_mtime)
+
             try:
                 status = process_include_file(include_path, target_folder, vanilla_root,
                                               parser, transformer,
-                                              macros_mtime=macros_mtime, force=force,
+                                              macros_mtime=inc_floor, force=force,
                                               fragment_cache=fragment_cache)
             except (KeyError, ValueError) as e:
                 # Address resolution / structural errors: report and keep going.
@@ -420,9 +512,12 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
             # 'missing' already reported its own line inside process_include_file.
 
     print("-" * 50)
+    removed_count = prune_orphan_txt(target_folder)
     summary = f"Recursive compilation completed! Total files processed: {compiled_count}"
     if skipped_count:
         summary += f", up to date (skipped): {skipped_count}"
+    if removed_count:
+        summary += f", orphans removed: {removed_count}"
     print(summary)
 
 if __name__ == "__main__":
@@ -444,5 +539,3 @@ if __name__ == "__main__":
     vanilla_root = positional[1] if len(positional) > 1 else None
 
     compile_folder(target_dir, vanilla_root, force=force)
-
-
