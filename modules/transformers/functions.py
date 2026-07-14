@@ -5,11 +5,26 @@ class FunctionsMixin:
         if len(items) > 1 and items[1] is not None:
             arg = items[1]
 
+            # Reject an arithmetic expression as a direct call argument. The
+            # engine does not accept an inline accumulator value-block where a
+            # trigger/effect/MTTH key expects a scalar (e.g. factor(1 + x) breaks
+            # focus-tree evaluation). Compute it into a variable first.
+            # Confirmed in-game on v1.19.2.
+            if self._is_expr(arg):
+                raise ValueError(
+                    f"Arithmetic expression cannot be passed directly to "
+                    f"'{func_name}(...)': '{func_name}({self._expr_to_str(arg)})'. "
+                    f"HoI4 rejects an inline value-block here. Assign it to a "
+                    f"(temp) variable first, e.g.:\n"
+                    f"    _tmp <- {self._expr_to_str(arg)}\n"
+                    f"    {func_name}(_tmp)"
+                )
+
             # Unwrap a COUNTRY_TAG sentinel to its bare tag.
             if isinstance(arg, tuple) and arg and arg[0] == "COUNTRY_TAG":
                 arg = arg[1]
             # Map standard true/false to Clausewitz yes/no. Only strings are
-            # touched — a non-string arg (an int, or an ("ARITH", ...) marker the
+            # touched вЂ” a non-string arg (an int, or an ("ARITH", ...) marker the
             # post-pass will lift) must pass through untouched, NOT be str()'d.
             elif isinstance(arg, str):
                 if arg == "true":
@@ -26,6 +41,15 @@ class FunctionsMixin:
         scope = str(items[0])   # "variable"
         func  = str(items[1])   # "can_ROOT_get_wargoal_on_THIS"
         arg   = items[2] if len(items) > 2 else None
+
+        if self._is_expr(arg):
+            raise ValueError(
+                f"Arithmetic expression cannot be passed directly to "
+                f"'{scope}::{func}(...)'. HoI4 rejects an inline value-block "
+                f"here. Assign it to a (temp) variable first, e.g.:\n"
+                f"    _tmp <- {self._expr_to_str(arg)}\n"
+                f"    {scope}::{func}(_tmp)"
+            )
 
         # Preserve non-string args (int / ("ARITH", ...) marker); default the
         # empty case to "yes".
@@ -66,7 +90,14 @@ class FunctionsMixin:
         else:
             name = ref
 
+        if self._is_expr(arg):
+            raise ValueError(
+                f"Arithmetic expression cannot be passed directly to "
+                f"'{name}::{func}(...)'. HoI4 rejects an inline value-block "
+                f"here. Assign it to a (temp) variable first, e.g.:\n"
+                f"    _tmp <- {self._expr_to_str(arg)}\n"
+                f"    {name}::{func}(_tmp)"
+            )
+
         inner_val = "yes" if arg is None else arg
         return ("ASSIGN", name, "=", ("BLOCK", [("ASSIGN", func, "=", inner_val)]))
-
-

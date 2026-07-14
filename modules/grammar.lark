@@ -152,8 +152,37 @@ bracket_list: UNQUOTED_VALUE "[" value ("," value)+ "]"
 # VALUES
 # =============================================================================
 
-?value: simple_value
-      | arith_expr
+?value: arith_expr
+
+# Arithmetic with C-like precedence, lowest to highest:
+#   sum   : + -            (left associative)
+#   term  : * / %          (left associative)
+#   power : **             (right associative)
+#   factor: unary, parens, math builtins, and simple_value atoms
+# A single atom (no operator) collapses straight back to simple_value via the
+# ?-inlined chain, so non-arithmetic values are unaffected. The whole tree is
+# compiled to a nested accumulator `value = { ... }` block by a post-pass.
+?arith_expr: sum
+
+?sum:  sum ADD_OP term    -> arith_binop
+    |  term
+
+?term: term MUL_OP power  -> arith_binop
+    |  power
+
+# Right associative: `2 ** 3 ** 2` == `2 ** (3 ** 2)`.
+?power: factor POW_OP power -> arith_binop
+      | factor
+
+?factor: "(" arith_expr ")"
+       | math_func
+       | simple_value
+
+# Math builtins that take explicit argument lists. Kept as their own rule
+# (not func_call) so multi-arg forms like clamp(x, lo, hi) are expressible and
+# so they can appear as operands inside a larger expression. Dispatch by name
+# happens in the transformer.
+math_func: MATH_FUNC_NAME "(" arith_expr ("," arith_expr)* ")"
 
 ?simple_value: array_size
              | array_access
@@ -162,11 +191,6 @@ bracket_list: UNQUOTED_VALUE "[" value ("," value)+ "]"
              | COUNTRY_TAG    -> country_tag
              | UNQUOTED_VALUE -> unquoted_value
              | string
-
-# Inline arithmetic (no nesting): `a + b`, `x * 2`. Lifted into temp vars
-# by a post-pass. Operands are simple_value, so chaining (`a + b + c`)
-# is intentionally not accepted.
-arith_expr: simple_value ARITH_OP simple_value
 
 string: ESCAPED_STRING
 
@@ -184,7 +208,7 @@ generic_block: UNQUOTED_VALUE ("(" ")")? block
 prefixed_block: PREFIXED_REF ("[" value "]")? block
 
 # Raw (verbatim) block: `raw name:` (multiline) or `raw name: { ... }` (inline).
-# Its lines are emitted literally, with no check_variable / "= yes" sugar — an
+# Its lines are emitted literally, with no check_variable / "= yes" sugar вЂ” an
 # escape hatch for vanilla trigger blocks (has_opinion) and bare-token lists
 # (ai_national_focuses). The middle token of a raw line may be an operator OR a
 # bare identifier (a macro operator-placeholder); a lone token is emitted as-is.
@@ -209,14 +233,24 @@ null_check:    value COMP_OPERATOR NULL
 operator:      "=" | COMP_OPERATOR_VANILLA
 
 # =============================================================================
-# TERMINALS — OPERATORS
+# TERMINALS вЂ” OPERATORS
 # =============================================================================
 
 COMP_OPERATOR:         "==" | "!=" | ">" | "<" | ">=" | "<="
 COMP_OPERATOR_VANILLA: ">" | "<" | ">=" | "<="
 SHORT_ASSIGN.2:        "<-"
 MATH_OPERATOR.2:       "+=" | "-=" | "*=" | "/="
-ARITH_OP:              "+" | "-" | "*" | "/"
+# Arithmetic operators, split by precedence tier. POW_OP ("**") has higher
+# priority than MUL_OP so "**" is never lexed as two "*". These feed the
+# sum/term/power cascade in the VALUES section.
+POW_OP.3:              "**"
+MUL_OP:                "*" | "/" | "%"
+ADD_OP:                "+" | "-"
+# Math builtins (sqrt/round/clamp). The lookahead `(?=\s*\()` matches the name
+# only when it is immediately used as a call, so a bare identifier named e.g.
+# `round` elsewhere is still an ordinary UNQUOTED_VALUE. Priority .4 wins over
+# UNQUOTED_VALUE when the lookahead holds.
+MATH_FUNC_NAME.4:      /(sqrt|round|clamp)(?=\s*\()/
 INC_DEC_OP.2:          "++" | "--"
 # Inline raw-block body: `{ ... }` with no newline or nested braces inside.
 # Priority .2 so the whole brace span is captured as one token on single-line
@@ -227,7 +261,7 @@ INLINE_RAW.2:          /\{[^{}\n]*\}/
 # (var(...), var=honor_stat) is NOT captured and stays an ordinary identifier.
 PREFIXED_REF.3:        /(var|token|mtth):[A-Za-z0-9_.@]+/
 # `raw` block marker. Lookahead guards the word boundary so an identifier like
-# `raw_score` or `rawdata` is NOT captured — only a standalone `raw`.
+# `raw_score` or `rawdata` is NOT captured вЂ” only a standalone `raw`.
 RAW_KW.3:              /raw(?![A-Za-z0-9_])/
 NULL:                  "null"
 NOT_OP:                "not"
@@ -235,7 +269,7 @@ AND_OP:                "and"
 OR_OP:                 "or"
 
 # =============================================================================
-# TERMINALS — VALUES & NAMES
+# TERMINALS вЂ” VALUES & NAMES
 # =============================================================================
 
 # Digits with optional single underscores as separators (e.g. 1_000_000)
@@ -265,5 +299,3 @@ _LPAR: "("
 _RPAR: ")"
 _LSQB: "["
 _RSQB: "]"
-
-

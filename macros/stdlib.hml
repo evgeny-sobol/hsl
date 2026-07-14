@@ -1,0 +1,2 @@
+macro compare(field, op, val):
+  raw field op val

@@ -349,14 +349,24 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
 
     global_macros = {} # This dictionary will store all processed macros
 
-    # Recursively collect every .hml macro library inside the target folder.
+    # Recursively collect every .hml macro library. Two sources:
+    #   1. the compiler's own directory (the macro "standard library"), and
+    #   2. the target folder (project-local macros).
+    # Deduped by real path so a target inside the compiler dir isn't scanned twice.
     # Sorted for a deterministic load order, so cross-file overrides are predictable.
-    hml_paths = sorted(
-        os.path.join(root, f)
-        for root, _dirs, files in os.walk(target_folder)
-        for f in files
-        if f.endswith('.hml')
-    )
+    stdlib_dir = os.path.dirname(os.path.abspath(__file__))
+    seen_hml = set()
+    hml_paths = []
+    for base in (stdlib_dir, target_folder):
+        for root, _dirs, files in os.walk(base):
+            for f in files:
+                if not f.endswith('.hml'):
+                    continue
+                p = os.path.realpath(os.path.join(root, f))
+                if p not in seen_hml:
+                    seen_hml.add(p)
+                    hml_paths.append(p)
+    hml_paths.sort()
 
     # Newest macro-library timestamp: an implicit dependency of EVERY output,
     # since both .hsl files and .include payloads compile through the macro-aware
@@ -373,6 +383,8 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
         # A single transformer fills the shared global_macros dict across all files
         hml_transformer = HslTransformer(external_macros=global_macros)
 
+        macro_origin = {}  # macro name -> file that first defined it
+
         for hml_path in hml_paths:
             relative_path = os.path.relpath(hml_path, target_folder)
             try:
@@ -384,7 +396,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
                 hml_tree = parser.parse(hml_code)
 
                 # Snapshot before transforming, so we can report what this file
-                # contributes and warn if it silently overrides an existing macro.
+                # contributes and detect duplicate macro names across files.
                 before = dict(global_macros)
                 hml_transformer.transform(hml_tree)
 
@@ -392,10 +404,20 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
                 overridden = [k for k in global_macros
                               if k in before and global_macros[k] is not before[k]]
 
-                summary = f"  - {relative_path}: +{len(added)} macro(s)"
+                # Duplicate macro definitions are a hard error: the standard
+                # library and project macros share one namespace.
                 if overridden:
-                    summary += f"  -️ overrides: {', '.join(sorted(overridden))}"
-                print(summary)
+                    print("Error: duplicate macro definition(s):")
+                    for name in sorted(overridden):
+                        first = os.path.relpath(macro_origin.get(name, '?'), target_folder)
+                        print(f"  - '{name}' redefined in {relative_path} "
+                              f"(first defined in {first})")
+                    return
+
+                for name in added:
+                    macro_origin[name] = hml_path
+
+                print(f"  - {relative_path}: +{len(added)} macro(s)")
 
             except Exception as e:
                 print(f"Error while reading macro library '{relative_path}': {e}")

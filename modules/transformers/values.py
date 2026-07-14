@@ -14,7 +14,7 @@ class ValuesMixin:
         try:
             return float(clean_val)
         except ValueError:
-            # If it turned out to be a plain string/variable (e.g. current_year) — return the original
+            # If it turned out to be a plain string/variable (e.g. current_year) вЂ” return the original
             return val
 
     # Ensure strings retain their quotation marks in the final code
@@ -37,12 +37,19 @@ class ValuesMixin:
     def prefixed_value(self, items):
         return str(items[0])
 
-    # Inline arithmetic `left OP right` -> a marker the post-pass lifts into a
-    # temp variable. No work happens here beyond recording op and operands.
-    def arith_expr(self, items):
+    # Arithmetic expression tree. A binary op node is ("MATH", op, left, right);
+    # a math builtin is ("MATHFN", name, [args...]). Operands are either further
+    # MATH/MATHFN nodes or plain scalars (simple_value results). The post-pass
+    # (_compile_expr) turns a whole tree into one nested accumulator value-block.
+    # Precedence and associativity are already encoded by the grammar cascade,
+    # so nothing to reorder here.
+    def arith_binop(self, items):
         left  = items[0]
         op    = str(items[1])
         right = items[2]
-        return ("ARITH", op, left, right)
+        return ("MATH", op, left, right)
 
-
+    def math_func(self, items):
+        name = str(items[0])
+        args = list(items[1:])
+        return ("MATHFN", name, args)
