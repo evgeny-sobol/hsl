@@ -99,7 +99,7 @@ prefixed_scoped_call: PREFIXED_REF ("[" value "]")? "::" UNQUOTED_VALUE "(" [val
 macro_def:    "macro" UNQUOTED_VALUE "(" macro_params? ")" block _NL?
 macro_call:   MACRO_NAME "(" macro_args? ")"
 macro_params: macro_param ("," macro_param)*
-macro_param:  UNQUOTED_VALUE ("=" value)?
+macro_param:  UNQUOTED_VALUE (EQUAL_OP value)?
 macro_args:   value ("," value)*
 
 # =============================================================================
@@ -124,8 +124,8 @@ array_loop.2: "for" UNQUOTED_VALUE "," UNQUOTED_VALUE "in" UNQUOTED_VALUE "[]" b
 # =============================================================================
 
 assignment:    value operator value
-short_assign:  value SHORT_ASSIGN value
-clear_var:     value SHORT_ASSIGN NULL
+short_assign:  value EQUAL_OP value
+clear_var:     value EQUAL_OP NULL
 math_assign:   value MATH_OPERATOR value
 inc_dec: value INC_DEC_OP
 
@@ -135,8 +135,8 @@ inc_dec: value INC_DEC_OP
 
 array_method:    UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" [value] ")"
 array_minmax:    UNQUOTED_VALUE "[]." UNQUOTED_VALUE "(" value "," value ")"
-array_assign:    UNQUOTED_VALUE "[" value "]" SHORT_ASSIGN value
-clear_arr:       UNQUOTED_VALUE "[]" SHORT_ASSIGN NULL
+array_assign:    UNQUOTED_VALUE "[" value "]" EQUAL_OP value
+clear_arr:       UNQUOTED_VALUE "[]" EQUAL_OP NULL
 array_null_check: UNQUOTED_VALUE "[]" COMP_OPERATOR NULL
 array_check:     value "in" UNQUOTED_VALUE "[]"
 array_not_check: value NOT_OP "in" UNQUOTED_VALUE "[]"
@@ -199,7 +199,6 @@ string: ESCAPED_STRING
 # =============================================================================
 
 block:         ":" comment? _NL _INDENT (_NL | item)* _DEDENT
-     |         "=" "{" (_NL | item)* "}"
 generic_block: UNQUOTED_VALUE ("(" ")")? block
 
 # A var:/token:/mtth: reference used as a SCOPE header, with an optional array
@@ -214,7 +213,7 @@ prefixed_block: PREFIXED_REF ("[" value "]")? block
 # bare identifier (a macro operator-placeholder); a lone token is emitted as-is.
 raw_block: RAW_KW UNQUOTED_VALUE ":" "{" comment? _NL _INDENT (_NL | raw_line _NL | comment _NL)* _DEDENT "}"  -> raw_block
          | RAW_KW UNQUOTED_VALUE ":" INLINE_RAW                                                              -> raw_block_inline
-raw_line:  value "=" value            -> raw_line_op
+raw_line:  value EQUAL_OP value            -> raw_line_op
         |  value COMP_OPERATOR value   -> raw_line_op
         |  value UNQUOTED_VALUE value   -> raw_line_op
         |  value                        -> raw_line_bare
@@ -224,13 +223,13 @@ raw_line:  value "=" value            -> raw_line_op
 # the absence of ':'. The middle token may be a comparison operator, '=', or a
 # bare identifier (a macro operator-placeholder like `_op`). This is what powers
 # a reusable `compare(field, op, val)` macro whose body is `raw field op val`.
-raw_stmt:  RAW_KW value "=" value            -> raw_stmt_op
+raw_stmt:  RAW_KW value EQUAL_OP value            -> raw_stmt_op
         |  RAW_KW value COMP_OPERATOR value   -> raw_stmt_op
         |  RAW_KW value UNQUOTED_VALUE value   -> raw_stmt_op
 comment:       COMMENT
 var_check:     value COMP_OPERATOR value
 null_check:    value COMP_OPERATOR NULL
-operator:      "=" | COMP_OPERATOR_VANILLA
+operator:      EQUAL_OP | COMP_OPERATOR_VANILLA
 
 # =============================================================================
 # TERMINALS вЂ” OPERATORS
@@ -238,7 +237,7 @@ operator:      "=" | COMP_OPERATOR_VANILLA
 
 COMP_OPERATOR:         "==" | "!=" | ">" | "<" | ">=" | "<="
 COMP_OPERATOR_VANILLA: ">" | "<" | ">=" | "<="
-SHORT_ASSIGN.2:        "<-"
+EQUAL_OP:              "="
 MATH_OPERATOR.2:       "+=" | "-=" | "*=" | "/="
 # Arithmetic operators, split by precedence tier. POW_OP ("**") has higher
 # priority than MUL_OP so "**" is never lexed as two "*". These feed the
