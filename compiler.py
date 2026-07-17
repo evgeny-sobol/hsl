@@ -334,6 +334,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
     .include - delta injections spliced into a mirrored vanilla file; requires
                vanilla_root to locate the original .txt.
     """
+    errors = 0
     # Defensive: strip stray surrounding quotes (illegal in paths anyway) so a
     # quoted vanilla root passed programmatically or via a shell quirk still works.
     if vanilla_root:
@@ -341,7 +342,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
     grammar_path = "modules/grammar.lark"
     if not os.path.exists(grammar_path):
         print(f"Error: Grammar file '{grammar_path}' not found in the project root!")
-        return
+        return False
     # Initialize Lark
     print(f"Loading grammar from {grammar_path}...")
     parser = Lark.open(grammar_path, start='start', parser='lalr', postlex=HslIndenter())
@@ -412,7 +413,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
                         first = os.path.relpath(macro_origin.get(name, '?'), target_folder)
                         print(f"  - '{name}' redefined in {relative_path} "
                               f"(first defined in {first})")
-                    return
+                    return False
 
                 for name in added:
                     macro_origin[name] = hml_path
@@ -421,7 +422,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
 
             except Exception as e:
                 print(f"Error while reading macro library '{relative_path}': {e}")
-                return
+                return False
 
         print(f"Successfully loaded macros: {len(global_macros)}")
 
@@ -429,7 +430,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
 
     if not os.path.exists(target_folder):
         print(f"Error: The specified directory '{target_folder}' does not exist!")
-        return
+        return False
 
     print(f"Scanning directory '{target_folder}' and all subdirectories...")
     print("-" * 50)
@@ -495,6 +496,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
 
             except Exception as e:
                 print(f"Error in file {filename}: {e}")
+                errors += 1
 
         # ---- Delta .include -> spliced .txt ---------------------------------
         for filename in include_files:
@@ -520,10 +522,12 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
                 # Address resolution / structural errors: report and keep going.
                 print(f"Including: {relative_path}...")
                 print(f"  {filename}: {e}")
+                errors += 1
                 continue
             except Exception as e:
                 print(f"Including: {relative_path}...")
                 print(f"  Error in include {filename}: {e}")
+                errors += 1
                 continue
 
             if status == 'built':
@@ -531,7 +535,9 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
                 compiled_count += 1
             elif status == 'skipped':
                 skipped_count += 1
-            # 'missing' already reported its own line inside process_include_file.
+            elif status == 'missing':
+                # already reported its own line inside process_include_file
+                errors += 1
 
     print("-" * 50)
     removed_count = prune_orphan_txt(target_folder)
@@ -540,7 +546,10 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
         summary += f", up to date (skipped): {skipped_count}"
     if removed_count:
         summary += f", orphans removed: {removed_count}"
+    if errors:
+        summary += f", ERRORS: {errors}"
     print(summary)
+    return errors == 0
 
 if __name__ == "__main__":
     # Usage: python compiler.py [target_dir] [vanilla_root] [--force]
@@ -560,4 +569,5 @@ if __name__ == "__main__":
     target_dir = positional[0] if positional else "."
     vanilla_root = positional[1] if len(positional) > 1 else None
 
-    compile_folder(target_dir, vanilla_root, force=force)
+    ok = compile_folder(target_dir, vanilla_root, force=force)
+    sys.exit(0 if ok else 1)
