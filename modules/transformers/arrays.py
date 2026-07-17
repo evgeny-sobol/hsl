@@ -1,5 +1,15 @@
 class ArraysMixin:
-    # Writing a value by index: arr[i] <- val
+    # An array reference may carry a scope prefix: `cty.rivals`, `ROOT.rivals`,
+    # `_this.rivals`. The leading '_' that marks a *temp array* belongs to the
+    # array NAME, not to the scope. Testing the whole string would read the '_'
+    # of a temp scope variable (`_this.rivals` -> wrongly temp) and would miss a
+    # temp array behind a plain scope (`cty._rivals` -> wrongly persistent).
+    # So always test the segment after the last '.'.
+    @staticmethod
+    def _is_temp_array(arr):
+        return arr.rsplit(".", 1)[-1].startswith("_")
+
+    # Writing a value by index: arr[i] = val
     def array_assign(self, items):
         arr = str(items[0])
         i = items[1]
@@ -39,7 +49,7 @@ class ArraysMixin:
         # command, not the name, so every operation on a '_' array must use the
         # temp variant — otherwise add/remove hit a persistent array while clear
         # hits a temp one, silently targeting two different arrays.
-        is_temp = arr.startswith("_")
+        is_temp = self._is_temp_array(arr)
 
         if method == "add":
             cmd = "add_to_temp_array" if is_temp else "add_to_array"
@@ -57,7 +67,7 @@ class ArraysMixin:
     # Temp arrays (leading '_') map to clear_temp_array, which HoI4 does provide.
     def clear_arr(self, items):
         arr = str(items[0])
-        cmd = "clear_temp_array" if arr.startswith("_") else "clear_array"
+        cmd = "clear_temp_array" if self._is_temp_array(arr) else "clear_array"
         return ("ASSIGN", cmd, "=", arr)
 
     # Two-argument array search: arr[].min(value, index) / arr[].max(value, index)
