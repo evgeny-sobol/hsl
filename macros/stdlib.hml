@@ -1,2 +1,5 @@
+macro can_build_railway(from, to):
+  raw can_build_railway: { start_state=from target_state=to }
+
 macro compare(field, op, val):
   raw field op val

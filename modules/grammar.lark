@@ -7,8 +7,11 @@ start: (_NL | item)*
 ?item: if_statement
      | elif_statement
      | else_statement
+     | while_statement
+     | match_statement
      | linq_statement
      | array_loop
+     | range_loop
      | macro_def
      | raw_block
      | raw_stmt          _NL
@@ -25,6 +28,8 @@ start: (_NL | item)*
      | array_minmax     _NL
      | array_assign     _NL
      | var_check        _NL
+     | array_check      _NL
+     | array_not_check  _NL
      | not_statement    _NL
      | pass_statement   _NL
      | clear_var        _NL
@@ -42,6 +47,19 @@ start: (_NL | item)*
 if_statement:   "if"   ( "(" condition ")" | condition ) block
 elif_statement: "elif" ( "(" condition ")" | condition ) block
 else_statement: "else" block
+
+# `while cond:` -> while_loop_effect. Same shape as if_statement (condition
+# becomes a limit block, body follows); only the emitted key differs.
+while_statement: "while" ( "(" condition ")" | condition ) block
+
+# `match subject:` with `case a | b:` arms -> if / else_if / else chain.
+# Each case compares the subject against its patterns; multiple patterns are
+# OR-ed. `case _:` is the default arm and becomes the trailing `else`.
+# Pure sugar: the emitted triggers are the same check_variable / OR blocks the
+# equivalent if/elif/else would produce.
+match_statement: "match" value ":" comment? _NL _INDENT case_clause+ _DEDENT
+case_clause: "case" case_patterns ":" comment? _NL _INDENT (_NL | item)* _DEDENT
+case_patterns: value (PIPE_OP value)*
 
 # =============================================================================
 # CONDITIONS
@@ -118,6 +136,12 @@ loop_binding: UNQUOTED_VALUE "in"
 # Array iteration: `for value, index in arr[]:` -> for_each_loop.
 # Distinct from the scope loops above by the ',' after the first variable.
 array_loop.2: "for" UNQUOTED_VALUE "," UNQUOTED_VALUE "in" UNQUOTED_VALUE "[]" block
+
+# Numeric iteration: `for _x in range(end):` -> for_loop_effect.
+# range(end) / range(start, end) / range(start, end, step). Distinct from the
+# scope loops by the RANGE_KW terminal, and from array_loop by the absence of a
+# ',' before "in". Priority .3 so `range(` is not taken as a bare scope call.
+range_loop.3: "for" UNQUOTED_VALUE "in" RANGE_KW "(" value ("," value)~0..2 ")" block
 
 # =============================================================================
 # ASSIGNMENTS
@@ -250,6 +274,9 @@ ADD_OP:                "+" | "-"
 # `round` elsewhere is still an ordinary UNQUOTED_VALUE. Priority .4 wins over
 # UNQUOTED_VALUE when the lookahead holds.
 MATH_FUNC_NAME.4:      /(sqrt|round|clamp)(?=\s*\()/
+# `range` only when used as a call, so a bare identifier named `range` stays an
+# ordinary UNQUOTED_VALUE (same lookahead trick as MATH_FUNC_NAME).
+RANGE_KW.4:            /range(?=\s*\()/
 INC_DEC_OP.2:          "++" | "--"
 # Inline raw-block body: `{ ... }` with no newline or nested braces inside.
 # Priority .2 so the whole brace span is captured as one token on single-line
@@ -266,6 +293,8 @@ NULL:                  "null"
 NOT_OP:                "not"
 AND_OP:                "and"
 OR_OP:                 "or"
+# Pattern separator in `case a | b:`. Distinct from OR_OP ("or"), so no clash.
+PIPE_OP:               "|"
 
 # =============================================================================
 # TERMINALS вЂ” VALUES & NAMES

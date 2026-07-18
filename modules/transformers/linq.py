@@ -1,5 +1,5 @@
 class LinqMixin:
-    # Python-style loop head `cty in` → a SCOPE_DEF marker that binds the loop
+    # Python-style loop head `cty in` в†’ a SCOPE_DEF marker that binds the loop
     # variable so resolve_scopes can map it to THIS/PREV downstream.
     def loop_binding(self, items):
         return ("SCOPE_DEF", str(items[0]))
@@ -40,7 +40,7 @@ class LinqMixin:
 
     # Array iteration: for value, index in array_name[]:  ->  for_each_loop.
     # `value` and `index` are ordinary variables the engine writes each element
-    # into (NOT scope pointers), so no scope_var is bound — the body uses them
+    # into (NOT scope pointers), so no scope_var is bound вЂ” the body uses them
     # verbatim and resolve_scopes must leave them alone.
     def array_loop(self, items):
         value = str(items[0])
@@ -52,9 +52,39 @@ class LinqMixin:
             ("ASSIGN", "array", "=", array),
             ("ASSIGN", "value", "=", value),
         ]
-        # '_' is a throwaway index placeholder — omit the index line entirely.
+        # '_' is a throwaway index placeholder вЂ” omit the index line entirely.
         if index != "_":
             new_block_items.append(("ASSIGN", "index", "=", index))
         new_block_items += list(block_ast[1])
 
         return ("ASSIGN", "for_each_loop", "=", ("BLOCK", new_block_items, None))
+
+    # Numeric iteration: for _x in range(end) / range(start, end) /
+    # range(start, end, step)  ->  for_loop_effect.
+    # Like array_loop, the loop variable is an ordinary (temp) variable the
+    # engine writes each iteration into, NOT a scope pointer, so scope_var stays
+    # None and the body uses the name verbatim.
+    # HoI4 defaults: start = 0, add = 1, so those lines are emitted only when the
+    # user supplied them. `end` is exclusive, matching Python's range().
+    def range_loop(self, items):
+        var = str(items[0])
+        # items[1] is the RANGE_KW token ("range"); args sit between it and the block.
+        args = list(items[2:-1])
+        block_ast = items[-1]
+
+        if len(args) == 1:
+            start, end, step = None, args[0], None
+        elif len(args) == 2:
+            start, end, step = args[0], args[1], None
+        else:
+            start, end, step = args[0], args[1], args[2]
+
+        new_block_items = [("ASSIGN", "value", "=", var)]
+        if start is not None:
+            new_block_items.append(("ASSIGN", "start", "=", start))
+        new_block_items.append(("ASSIGN", "end", "=", end))
+        if step is not None:
+            new_block_items.append(("ASSIGN", "add", "=", step))
+        new_block_items += list(block_ast[1])
+
+        return ("ASSIGN", "for_loop_effect", "=", ("BLOCK", new_block_items, None))

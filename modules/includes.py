@@ -1,4 +1,3 @@
-import os
 import re
 
 # =============================================================================
@@ -99,15 +98,18 @@ def dedent_lines(lines):
 # =============================================================================
 
 def _skip_string(text, i):
-    """`i` points at the opening quote; return index just past the closing quote."""
+    """`i` points at the opening quote; return index just past the closing quote.
+
+    Clausewitz strings do NOT use backslash escaping — a backslash is a literal
+    path separator (e.g. "gfx\\interface\\x.dds"), so a string ending in \\" still
+    closes at that quote. Treating \\" as an escaped quote would swallow the
+    closing quote, run the "string" to end-of-file, and unbalance every brace
+    after it.
+    """
     i += 1
     n = len(text)
     while i < n:
-        c = text[i]
-        if c == '\\':
-            i += 2
-            continue
-        if c == '"':
+        if text[i] == '"':
             return i + 1
         i += 1
     return i  # unterminated; treat rest as string
@@ -636,6 +638,56 @@ def _collect(node, nav_path, vanilla_text, compile_fragment, injections, index):
                  vanilla_text, compile_fragment, injections, index)
 
 
+def _eof_brace_deficit(text):
+    """Net unclosed '{' at EOF (comments and strings ignored), plus whether the
+    running depth ever went negative. A negative excursion means a stray or
+    misplaced '}' — a real structural defect, not a simple unterminated tail."""
+    i = 0
+    n = len(text)
+    depth = 0
+    went_negative = False
+    while i < n:
+        c = text[i]
+        if c == '#':
+            i = _skip_comment(text, i)
+            continue
+        if c == '"':
+            i = _skip_string(text, i)
+            continue
+        if c == '{':
+            depth += 1
+            i += 1
+            continue
+        if c == '}':
+            depth -= 1
+            if depth < 0:
+                went_negative = True
+            i += 1
+            continue
+        i += 1
+    return depth, went_negative
+
+
+def normalize_eof_braces(text):
+    """Append the trailing top-level '}' that some vanilla/mod files omit.
+
+    HoI4's engine tolerates a missing closing brace at end of file (it auto-
+    closes at EOF), so certain common/ideas files ship structurally sound right
+    up to the final block yet leave the outermost block unclosed. A strict
+    brace matcher can't splice into such a file. This restores the missing
+    closer(s) so the delta can be injected, exactly matching engine behaviour.
+
+    Acts ONLY when the deficit is a clean unterminated tail: a positive net of
+    unclosed '{' AND depth never went negative. Balanced files and genuine
+    defects (extra or misplaced '}') are returned unchanged so they still
+    surface as real errors instead of being silently masked.
+    """
+    deficit, went_negative = _eof_brace_deficit(text)
+    if deficit <= 0 or went_negative:
+        return text
+    return text + '\n' + '\n'.join('}' for _ in range(deficit)) + '\n'
+
+
 def transpile_include_source(vanilla_text, include_source, compile_fragment):
     """
     Core, dependency-free transform.
@@ -648,6 +700,10 @@ def transpile_include_source(vanilla_text, include_source, compile_fragment):
 
     Returns the new .txt text.
     """
+    # Some vanilla/mod files omit their final top-level '}' (the engine auto-
+    # closes at EOF); restore it so strict brace-matching can splice the delta.
+    vanilla_text = normalize_eof_braces(vanilla_text)
+
     root = parse_include(include_source)
 
     nav_names = set()
@@ -664,6 +720,3 @@ def transpile_include_source(vanilla_text, include_source, compile_fragment):
     injections = []
     _collect(root, [], vanilla_text, compile_fragment, injections, index)
     return splice_injections(vanilla_text, injections)
-
-
-
