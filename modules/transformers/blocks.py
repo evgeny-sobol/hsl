@@ -17,11 +17,34 @@ class BlocksMixin:
     # take a trigger/effect block (e.g. any_controlled_state) rather than the
     # single argument scoped_func_call handles.
     def scoped_block(self, items):
+        items = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
         scope = str(items[0])
         func  = str(items[1])
         block_ast = items[-1]
         return ("ASSIGN", scope, "=",
                 ("BLOCK", [("ASSIGN", func, "=", block_ast)]))
+
+    # Multi-level scope chain A->B->...->trigger(arg) -> nested scope blocks.
+    # All names but the last are scope transitions; the last name is the
+    # trigger/effect and takes the (optional) argument.
+    #   A->B->C(x)  ->  A = { B = { C = x } }
+    def scoped_chain(self, items):
+        # Drop ARROW tokens; remaining are name tokens plus an optional arg.
+        parts = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
+        # Names are UNQUOTED_VALUE tokens; the arg (if any) is the one non-None
+        # element that is not such a token (empty `()` -> default "yes").
+        parts = [p for p in parts if p is not None]
+        name_toks = [p for p in parts if hasattr(p, "type") and p.type == "UNQUOTED_VALUE"]
+        non_names = [p for p in parts if not (hasattr(p, "type") and p.type == "UNQUOTED_VALUE")]
+        arg = non_names[0] if non_names else "yes"
+        if isinstance(arg, tuple) and arg and arg[0] == "COUNTRY_TAG":
+            arg = arg[1]
+
+        *scopes, trigger = [str(t) for t in name_toks]
+        node = ("ASSIGN", trigger, "=", arg)   # innermost trigger
+        for sc in reversed(scopes):            # wrap in each scope, outward
+            node = ("ASSIGN", sc, "=", ("BLOCK", [node]))
+        return node
 
     # Bracket list-trigger: name[a, b, c] -> name = { a b c } on ONE line.
     # Emitted as RAW_INLINE so the renderer prints it inline instead of expanding

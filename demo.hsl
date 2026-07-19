@@ -7,21 +7,21 @@
 # -----------------------------------------------------------------------------
 # Variables & assignment
 # -----------------------------------------------------------------------------
-# `=` writes a persistent variable; a leading underscore marks a temp variable.
-current_year = 2026
-current_year++
-current_year--
+# `=` writes a temp variable; a leading `&` marks a persistent variable.
+&current_year = 2026
+&current_year++
+&current_year--
 
-_century = 50
-_century *= 4
-_century /= 2
+century = 50
+century *= 4
+century /= 2
 
-current_year += _century
-current_year -= 100
+&current_year += century
+&current_year -= 100
 
 # `null` clears a persistent variable from memory.
-scratch = 7
-scratch = null
+&scratch = 7
+&scratch = null
 
 
 # -----------------------------------------------------------------------------
@@ -29,14 +29,23 @@ scratch = null
 # -----------------------------------------------------------------------------
 # Full C-like precedence: ** > * / % > + -. Parentheses override it. The whole
 # tree compiles to one nested accumulator value-block — no temp scaffolding.
-_a = 1 + 2 * 3
-_b = (1 + 2) * 3
-_c = 2 ** 3 ** 2
-_d = 17 % 5
+a = 1 + 2 * 3
+b = (1 + 2) * 3
+c = 2 ** 3 ** 2
+d = 17 % 5
 
-# Builtins: sqrt(x), round(x), clamp(x, lo, hi). abs via sqrt(x**2).
-_hyp   = sqrt(_a ** 2 + _b ** 2)
-_score = clamp(round(_c / 10), 0, 50)
+# Builtins: sqrt(x), round(x), clamp(x, lo, hi), abs(x).
+hyp   = sqrt(a ** 2 + b ** 2)
+score = clamp(round(c / 10), 0, 50)
+dist  = abs(a - b)
+
+# Random builtins. randi/randf write into a variable; the max bound is
+# inclusive. rand(v) uses the engine's default range. `var = randi(lo, hi)` is
+# sugar for randi(var, lo, hi).
+randi(luck, 1, 6)
+&seed = randi(0, 100)
+spread = randf(0.0, 1.0)
+rand(chaos)
 
 
 # -----------------------------------------------------------------------------
@@ -50,7 +59,7 @@ else:
   log("current_year ([?current_year]) is exactly 2025")
 
 # `== null` tests variable existence.
-current_year = null
+&current_year = null
 if current_year == null:
   log("current_year was cleared")
 
@@ -67,24 +76,24 @@ if not is_historical_focus_on():
 # Multiple patterns per arm via `|`; `case _` is the default.
 match rival_ideology:
   case conservatism | liberalism | socialism:
-    _pop = party_popularity@democratic
+    pop = party_popularity@democratic
   case fascism | nazism:
-    _pop = party_popularity@fascism
+    pop = party_popularity@fascism
   case neutrality:
-    _pop = party_popularity@neutrality
+    pop = party_popularity@neutrality
   case _:
-    _pop = 0
+    pop = 0
 
 
 # -----------------------------------------------------------------------------
 # Loops: numeric range, while, scope iteration, indexed array iteration
 # -----------------------------------------------------------------------------
 # range(end) / range(start, end) / range(start, end, step) — end exclusive.
-for _i in range(5):
-  log("tick [?_i]")
+for i in range(5):
+  log("tick [?i]")
 
-for _j in range(2, 30, 3):
-  log("step [?_j]")
+for j in range(2, 30, 3):
+  log("step [?j]")
 
 # while runs its body until the condition (a limit trigger) fails.
 while enemies[].size() < 4:
@@ -94,29 +103,42 @@ while enemies[].size() < 4:
 # -----------------------------------------------------------------------------
 # Arrays
 # -----------------------------------------------------------------------------
-enemies[].add($GER)
-enemies[].add($ITA)
-enemies[].remove($ITA)
+enemies[].add(GER)
+enemies[].add(ITA)
+enemies[].erase(ITA)
 enemies[].clear()
 
-enemies[].add($SOV)
-enemies[].add($JAP)
+enemies[].add(SOV)
+enemies[].add(JAP)
 enemies_count = enemies[].size()
-enemies[0] = $USA
-_first = enemies[0]
+enemies[0] = USA
+first = enemies[0]
+
+# Removal: erase(v) by value, remove_at(i) by index, pop() drops the last.
+enemies[].add(ENG)
+enemies[].remove_at(0)
+enemies[].pop()
+
+# Random access: rand() picks a random element, rand_idx() a random index.
+pick     = enemies[].rand()
+pick_idx = enemies[].rand_idx()
+
+# resize(n) pads with 0 (or truncates); resize(n, v) pads with a given value.
+reserves[].resize(3)
+reserves[].resize(5, -1)
 
 # Membership works as a statement and inside conditions.
-if $USA in enemies[] and enemies_count > 0:
+if USA in enemies[] and enemies_count > 0:
   log("USA is on the enemy list")
-if $ENG not in enemies[]:
+if ENG not in enemies[]:
   log("England is not an enemy")
 
 # find lowest / highest: value + index written into temp vars.
 threat[].add(10)
 threat[].add(4)
 threat[].add(25)
-threat[].min(_weakest, _weakest_idx)
-threat[].max(_strongest, _strongest_idx)
+threat[].min(weakest, weakest_idx)
+threat[].max(strongest, strongest_idx)
 
 
 # -----------------------------------------------------------------------------
@@ -125,20 +147,27 @@ threat[].max(_strongest, _strongest_idx)
 if is_major() and has_ideology_group(democracy):
   log("Major democracy")
 
-# `scope::trigger(arg)` and prefixed engine refs (var: / token: / mtth:).
-if THIS::has_war_with(FROM):
+# `scope->trigger(arg)` and prefixed engine refs (var: / token: / mtth:).
+if THIS->has_war_with(FROM):
   log("At war with FROM")
 
-_weight = mtth:base_weight
-_saved  = var:cached_value
+# Multi-level chains nest each scope: A->B->C(x) => A = { B = { C = x } }.
+PREV->any_controlled_state->is_on_continent(south_america)
+
+# `scope->name:` opens a nested block inside that scope transition.
+FROM->every_owned_state:
+  add_extra_state_shared_building_slots(1)
+
+weight = mtth:base_weight
+saved  = var:cached_value
 
 
 # -----------------------------------------------------------------------------
 # Macros  (compile-time expansion; defaults supported)
 # -----------------------------------------------------------------------------
-macro grant_boost(amount):
-  add_stability(amount)
-  add_war_support(amount)
+macro grant_boost(_amount_):
+  add_stability(_amount_)
+  add_war_support(_amount_)
 
 $grant_boost(0.05)
 
@@ -149,7 +178,7 @@ $grant_boost(0.05)
 # for x in scope(): iterate a country scope; .which(cond) filters it.
 for cty in every_country():
   for rnd in random_other_country().which(is_major() and not has_government(cty)):
-    cty.rivals[].add(rnd)
+    cty.&rivals[].add(rnd)
 
 # Indexed array iteration: `for value, index in arr[]:` (use _ to drop index).
 for foe, idx in enemies[]:
@@ -163,8 +192,8 @@ for foe, idx in enemies[]:
 ai_will_do:
   base(100)
   modifier:
-    _f = clamp(1 - opinion@FROM / 100, 0, 2)
-    factor(_f)
+    f = clamp(1 - opinion@FROM / 100, 0, 2)
+    factor(f)
 
 # `raw` passes verbatim Clausewitz through untouched, for anything HSL
 # doesn't model natively.

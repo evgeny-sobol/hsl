@@ -101,7 +101,17 @@ def preserve_empty_lines(source_code):
     return '\n'.join(lines)
 
 def resolve_scopes(text, scope_stack):
-    if not isinstance(text, str) or not scope_stack:
+    if not isinstance(text, str):
+        return text
+
+    # Strip the persistent-variable marker '&' (compiler-only) from every
+    # emitted name. It may sit at the start (`&foo`) or after a scope prefix
+    # (`global.&foo`); a regex removes it wherever it directly precedes an
+    # identifier. Runs regardless of scope_stack so reads are cleaned too.
+    if "&" in text:
+        text = re.sub(r'&(?=[A-Za-z_])', '', text)
+
+    if not scope_stack:
         return text
 
     # Traverse the stack backwards

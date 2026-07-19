@@ -18,10 +18,12 @@ start: (_NL | item)*
      | expr_statement    _NL
      | func_call        _NL
      | scoped_func_call _NL
+     | scoped_chain      _NL
      | scoped_block
      | rand_call         _NL
      | prefixed_scoped_call _NL
      | assignment       _NL
+     | array_rand_assign _NL
      | rand_assign       _NL
      | rand_call         _NL
      | short_assign     _NL
@@ -104,19 +106,23 @@ expr_statement: value
 # =============================================================================
 
 func_call:        UNQUOTED_VALUE "(" [value] ")"
-scoped_func_call: UNQUOTED_VALUE "::" UNQUOTED_VALUE "(" [value] ")"
+scoped_func_call: UNQUOTED_VALUE ARROW UNQUOTED_VALUE "(" [value] ")"
+
+# Multi-level scope chain A->B->...->trigger(arg) -> nested scope blocks.
+# Needs >=2 arrows so it doesn't collide with single-arrow scoped_func_call.
+scoped_chain: UNQUOTED_VALUE ARROW UNQUOTED_VALUE (ARROW UNQUOTED_VALUE)+ "(" [value] ")"
 
 # `scope::func:` opening a block (vs scoped_func_call's `scope::func(arg)`).
 # For engine scope-transitions that take a trigger/effect block rather than a
 # single argument, e.g. THIS::any_controlled_state: -> THIS = { any_controlled_state = { ... } }
-scoped_block: UNQUOTED_VALUE "::" UNQUOTED_VALUE block
+scoped_block: UNQUOTED_VALUE ARROW UNQUOTED_VALUE block
 
 # One-line form of a prefixed scope + trigger:
 #   var:NAME[i]::func(arg)  ->  var:NAME^i = { func = arg }
 #   var:NAME::func(arg)     ->  var:NAME   = { func = arg }
 # The '::' separator mirrors scoped_func_call; the left side is a PREFIXED_REF
 # with an optional [index].
-prefixed_scoped_call: PREFIXED_REF ("[" value "]")? "::" UNQUOTED_VALUE "(" [value] ")"
+prefixed_scoped_call: PREFIXED_REF ("[" value "]")? ARROW UNQUOTED_VALUE "(" [value] ")"
 
 # =============================================================================
 # MACROS
@@ -227,6 +233,16 @@ math_func: MATH_FUNC_NAME "(" arith_expr ("," arith_expr)* ")"
 rand_call: RAND_FUNC_NAME "(" (value ("," value ("," value)?)?)? ")"
 rand_assign: value EQUAL_OP rand_call
 
+# Random array access, assignment-RHS only (they produce a random value into
+# the LHS variable, so they can't be bare inline values):
+#   var = arr[].rand_idx()  -> random VALID index 0..size-1 into var
+#   var = arr[].rand()      -> random ELEMENT of arr into var
+# rand_idx uses max=arr^num with the engine's half-open [min,max), giving
+# 0..size-1 exactly (no off-by-one — unlike randi(0, arr[].size()) which is
+# inclusive and overruns by one).
+array_rand: UNQUOTED_VALUE "[]." ARRAY_RAND_METHOD "(" ")"
+array_rand_assign: value EQUAL_OP array_rand
+
 ?simple_value: array_size
              | array_access
              | macro_call
@@ -294,10 +310,13 @@ ADD_OP:                "+" | "-"
 # UNQUOTED_VALUE when the lookahead holds.
 MATH_FUNC_NAME.4:      /(sqrt|abs|round|clamp)(?=\s*\()/
 RAND_FUNC_NAME.4:      /(rand|randf|randi)(?=\s*\()/
+ARRAY_RAND_METHOD.5:   "rand_idx" | "rand"
 # `range` only when used as a call, so a bare identifier named `range` stays an
 # ordinary UNQUOTED_VALUE (same lookahead trick as MATH_FUNC_NAME).
 RANGE_KW.4:            /range(?=\s*\()/
 INC_DEC_OP.2:          "++" | "--"
+# Scope-access operator (was `::`). High priority so `->` is one token.
+ARROW.4:               "->"
 # Inline raw-block body: `{ ... }` with no newline or nested braces inside.
 # Priority .2 so the whole brace span is captured as one token on single-line
 # raw blocks, instead of matching the literal "{" of the multi-line form.
@@ -321,7 +340,7 @@ PIPE_OP:               "|"
 # =============================================================================
 
 # Digits with optional single underscores as separators (e.g. 1_000_000)
-UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.@]+/
+UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.@&]+/
 COUNTRY_TAG:    "$" /[A-Z0-9_]+/
 MACRO_NAME.2:   "$" /[a-z][a-zA-Z0-9_]*/
 COMMENT:        /#[^\n]*/

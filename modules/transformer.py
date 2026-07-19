@@ -83,6 +83,44 @@ class HslTransformer(
                 out.append(it)
         return out
 
+    # --- variable lifetime marker ('&' = persistent; default = temp) ---------
+    # New semantics: a bare variable is TEMP by default. A leading '&' on the
+    # name (after any scope prefix, e.g. `&foo`, `global.&foo`) marks it
+    # PERSISTENT. The '&' is a compiler marker only and is stripped before the
+    # name is emitted to HoI4 script.
+    @staticmethod
+    def _var_is_temp(name):
+        seg = str(name).rsplit(".", 1)[-1]
+        return not seg.startswith("&")
+
+    @staticmethod
+    def _strip_persist(name):
+        # Remove the '&' marker from the last dotted segment for output.
+        s = str(name)
+        head, sep, tail = s.rpartition(".")
+        if tail.startswith("&"):
+            return f"{head}{sep}{tail[1:]}"
+        return s
+
+    @staticmethod
+    def _check_var_name(name):
+        # Under the new scheme a variable is temp by default and '&' marks
+        # persistent; a leading '_' is no longer a temp marker and is rejected so
+        # old '_'-prefixed code fails loudly instead of silently becoming a
+        # differently-scoped variable. Checks the last dotted segment (after any
+        # scope prefix), and after any '&' marker.
+        seg = str(name).rsplit(".", 1)[-1]
+        if seg.startswith("&"):
+            seg = seg[1:]
+        if seg.startswith("_"):
+            raise ValueError(
+                f"Variable name '{name}' starts with '_'. Underscores are no "
+                f"longer a temp marker: variables are temp by default, and '&' "
+                f"marks a persistent variable (e.g. &{seg.lstrip('_')}). Rename "
+                f"to drop the leading underscore."
+            )
+        return name
+
     def _is_expr(self, v):
         return isinstance(v, tuple) and v and v[0] in ("MATH", "MATHFN")
 
@@ -138,16 +176,6 @@ class HslTransformer(
     def _lift_seq(self, stmts):
         out = []
         for s in self._flatten(stmts):
-            # A bare arithmetic expression as a statement (e.g. `clamp(x,0,1)`
-            # or `1 + 2` with no `var =`) computes a value and discards it — it
-            # emits nothing and is almost always a forgotten assignment. Fail
-            # loudly instead of silently dropping it.
-            if (isinstance(s, tuple) and len(s) == 2 and s[0] == "EXPR"
-                    and self._is_expr(s[1])):
-                raise ValueError(
-                    f"Expression '{self._expr_to_str(s[1])}' is used as a "
-                    f"statement but its result is discarded. Did you mean to "
-                    f"assign it, e.g. `<var> = {self._expr_to_str(s[1])}`?")
             # A bare RANDCALL (rand*() used as a statement, not `var = rand*()`)
             # is finalized here into its effect(s). rand_assign handles the
             # assignment form before reaching this point.
@@ -167,11 +195,9 @@ class HslTransformer(
         if self._is_expr(v):
             return ("BLOCK", self._compile_expr(v))
         if isinstance(v, tuple) and v and v[0] == "BLOCK":
+            inner = self._flatten(v[1])
             scope_var = v[2] if len(v) > 2 else None
-            # Route the body through _lift_seq (not a bare _lift_stmt map) so the
-            # discarded-expression check and RANDCALL finalization apply inside
-            # nested blocks too, exactly as at top level.
-            new_inner = self._lift_seq(v[1])
+            new_inner = [self._lift_stmt(ist) for ist in inner]
             if scope_var is not None:
                 return ("BLOCK", new_inner, scope_var)
             return ("BLOCK", new_inner)

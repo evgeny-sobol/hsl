@@ -66,12 +66,12 @@ class FunctionsMixin:
         return self._build_rand(fname, [var] + args)
 
     def _build_rand(self, fname, args):
-        var = self._unwrap_tag(args[0])
+        var = self._check_var_name(str(self._unwrap_tag(args[0])))
         if fname == "rand":
             if len(args) != 1:
                 raise ValueError(f"rand() takes exactly 1 argument, got {len(args)}")
             cmd = "set_temp_variable_to_random" if self._is_temp_ref(var) else "set_variable_to_random"
-            return ("ASSIGN", cmd, "=", var)
+            return ("ASSIGN", cmd, "=", self._strip_persist(var))
 
         if len(args) != 3:
             raise ValueError(f"{fname}() takes exactly 3 arguments (var, min, max), got {len(args)}")
@@ -85,6 +85,7 @@ class FunctionsMixin:
                     f"{fname}(): {role} cannot be an arithmetic expression; "
                     f"assign it to a variable first, then pass that variable.")
         cmd = "set_temp_variable_to_random" if self._is_temp_ref(var) else "set_variable_to_random"
+        var = self._strip_persist(var)
 
         pre = []
         # randi makes max INCLUSIVE via max+1; randf leaves it as-is.
@@ -113,8 +114,8 @@ class FunctionsMixin:
         return pre + [call] if pre else call
 
     def _is_temp_ref(self, name):
-        # temp if the segment after any scope prefix ('.') starts with '_'.
-        return str(name).rsplit(".", 1)[-1].startswith("_")
+        # temp by default; '&' marks persistent. Delegates to the shared helper.
+        return self._var_is_temp(name)
 
     def _inline_accumulator(self, items):
         # Render a list of ("ASSIGN", key, "=", value) accumulator steps as a
@@ -138,8 +139,10 @@ class FunctionsMixin:
             return False
 
     def scoped_func_call(self, items):
-        scope = str(items[0])   # "variable"
-        func  = str(items[1])   # "can_ROOT_get_wargoal_on_THIS"
+        # items: [scope, ARROW, func, arg?]; drop the ARROW token.
+        items = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
+        scope = str(items[0])
+        func  = str(items[1])
         arg   = items[2] if len(items) > 2 else None
 
         if self._is_expr(arg):
@@ -166,7 +169,8 @@ class FunctionsMixin:
     # the func token, arg is the value AFTER it.
     def prefixed_scoped_call(self, items):
         ref = str(items[0])
-        rest = list(items[1:])
+        rest = [it for it in items[1:]
+                if not (hasattr(it, "type") and it.type == "ARROW")]
 
         # The func name is a Lark Token of type UNQUOTED_VALUE. Locate it; the
         # value before it (if any) is the index, the value after it is the arg.

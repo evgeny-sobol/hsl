@@ -7,22 +7,22 @@ Modding HoI4 means writing deeply nested, verbose `key = { ... }` blocks by hand
 ```python
 # HSL
 modifier:
-  _f = clamp(1 - opinion@FRA / 100, 0, 2)
-  factor(_f)
+  f = clamp(1 - opinion@FRA / 100, 0.0, 2.0)
+  factor(f)
 ```
 
 compiles to:
 
-```
+```perl
 # HoI4 script
 modifier = {
     set_temp_variable = {
-        _f = {
+        f = {
             value = { value = 1  subtract = { value = opinion@FRA  divide = 100 } }
-            clamp = { min = 0  max = 2 }
+            clamp = { min = 0.0  max = 2.0 }
         }
     }
-    factor = _f
+    factor = f
 }
 ```
 
