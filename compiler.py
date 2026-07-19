@@ -5,66 +5,10 @@ from lark import Lark
 from lark.indenter import Indenter
 from modules.transformer import HslTransformer
 from modules import includes
+from modules.codegen import generate_hoi4_code
+from modules.freshness import _macro_floor, _mtime, _is_fresh
+from modules.pruning import prune_orphan_txt
 
-import fnmatch
-
-
-def _collect_unignore_patterns(target_folder):
-    """Gather negation patterns (lines starting with '!') from every .gitignore
-    under target_folder. Returns a list of (dir, pattern) so a pattern is matched
-    relative to the .gitignore that declares it, mirroring git's scoping."""
-    patterns = []
-    for root, _dirs, files in os.walk(target_folder):
-        if '.gitignore' not in files:
-            continue
-        try:
-            with open(os.path.join(root, '.gitignore'), 'r', encoding='utf-8-sig') as f:
-                lines = f.read().splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            s = line.strip()
-            if s.startswith('!') and len(s) > 1:
-                patterns.append((root, s[1:].strip().lstrip('/')))
-    return patterns
-
-
-def _is_protected(txt_path, patterns):
-    """True if txt_path matches any '!' unignore pattern, matched both against
-    its basename and its path relative to the declaring .gitignore's directory."""
-    base = os.path.basename(txt_path)
-    for pdir, pat in patterns:
-        if fnmatch.fnmatch(base, pat):
-            return True
-        rel = os.path.relpath(txt_path, pdir).replace(os.sep, '/')
-        if fnmatch.fnmatch(rel, pat):
-            return True
-    return False
-
-
-def prune_orphan_txt(target_folder):
-    """Delete .txt files that have no sibling .hsl or .include source, unless the
-    .txt is protected by a '!' rule in a .gitignore. Returns the count removed."""
-    patterns = _collect_unignore_patterns(target_folder)
-    removed = 0
-    for root, _dirs, files in os.walk(target_folder):
-        stems = {f.rsplit('.', 1)[0] for f in files
-                 if f.endswith('.hsl') or f.endswith('.include')}
-        for f in files:
-            if not f.endswith('.txt'):
-                continue
-            if f[:-4] in stems:
-                continue
-            txt_path = os.path.join(root, f)
-            if _is_protected(txt_path, patterns):
-                continue
-            try:
-                os.remove(txt_path)
-                print(f"Removed orphan: {os.path.relpath(txt_path, target_folder)}")
-                removed += 1
-            except OSError as e:
-                print(f"  Could not remove {txt_path}: {e}")
-    return removed
 
 class HslIndenter(Indenter):
     NL_type = '_NL'
@@ -73,6 +17,7 @@ class HslIndenter(Indenter):
     INDENT_type = '_INDENT'
     DEDENT_type = '_DEDENT'
     tab_len = 2
+
 
 def preserve_empty_lines(source_code):
     """
@@ -100,170 +45,6 @@ def preserve_empty_lines(source_code):
 
     return '\n'.join(lines)
 
-def resolve_scopes(text, scope_stack):
-    if not isinstance(text, str):
-        return text
-
-    # Strip the persistent-variable marker '&' (compiler-only) from every
-    # emitted name. It may sit at the start (`&foo`) or after a scope prefix
-    # (`global.&foo`); a regex removes it wherever it directly precedes an
-    # identifier. Runs regardless of scope_stack so reads are cleaned too.
-    if "&" in text:
-        text = re.sub(r'&(?=[A-Za-z_])', '', text)
-
-    if not scope_stack:
-        return text
-
-    # Traverse the stack backwards
-    # Index 0 = last added item (THIS)
-    # Index 1 = second to last item (PREV), and so on
-    for index, var_name in enumerate(reversed(scope_stack)):
-        pointer = "THIS" if index == 0 else ".".join(["PREV"] * index)
-
-        # Match whole words only (\b) to avoid breaking partial matches
-        text = re.sub(rf'\b{re.escape(var_name)}\b', pointer, text)
-
-    return text
-
-def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
-    """
-    Recursively converts the AST back into Hearts of Iron IV source code.
-    """
-    if scope_stack is None:
-        scope_stack = []
-
-    strings = []
-    spacing = "\t" * indent_level
-
-    if isinstance(ast, list):
-        for item in ast:
-            strings.append(generate_hoi4_code(item, indent_level, scope_stack))
-        return "".join(strings)
-
-    if isinstance(ast, tuple):
-        node_type = ast[0]
-
-        if node_type == "COMMENT":
-            comment_text = ast[1]
-            if comment_text == "#___EMPTY_LINE___":
-                return "\n"
-            return f"{spacing}{comment_text}\n"
-
-        if node_type == "RAW_INLINE":
-            # Verbatim single-line block: `name = { body }`. body is emitted as
-            # given (already normalized), only scope vars resolved to THIS/PREV.
-            _, name, body = ast
-            name = resolve_scopes(name, scope_stack)
-            body = resolve_scopes(body, scope_stack)
-            return f"{spacing}{name} = {{ {body} }}\n"
-
-        if node_type == "RAW_BARE":
-            # A single verbatim token on its own line (e.g. a focus id in an
-            # ai_national_focuses list). No "= yes", just the token.
-            val = resolve_scopes(ast[1], scope_stack)
-            return f"{spacing}{val}\n"
-
-        if node_type == "RAW_ASSIGN":
-            # Verbatim trigger line `left op right`, no sugar (e.g. date < 1939.1.1).
-            _, left, op, right = ast
-            left  = resolve_scopes(left, scope_stack) if isinstance(left, str) else left
-            right = resolve_scopes(right, scope_stack) if isinstance(right, str) else right
-            return f"{spacing}{left} {op} {right}\n"
-
-        if node_type == "ASSIGN":
-            _, left, op, right = ast
-
-            left = resolve_scopes(left, scope_stack)
-
-            if isinstance(right, tuple) and right[0] == "BLOCK":
-                block_items = right[1]
-                scope_var = right[2] if len(right) > 2 else None
-
-                if scope_var:
-                    scope_stack.append(scope_var)
-
-                if len(block_items) == 1 and isinstance(block_items[0], tuple) and block_items[0][0] == "ASSIGN":
-                    inner_left  = block_items[0][1]
-                    inner_op    = block_items[0][2]
-                    inner_right = block_items[0][3]
-
-                    if not isinstance(inner_right, (tuple, list)):
-                        inner_left = resolve_scopes(inner_left, scope_stack)
-                        if isinstance(inner_right, str) and not inner_right.startswith('"'):
-                            inner_right = resolve_scopes(inner_right, scope_stack)
-
-                        if scope_var:
-                            scope_stack.pop()
-
-                        return f"{spacing}{left} {op} {{ {inner_left} {inner_op} {inner_right} }}\n"
-
-                block_content = generate_hoi4_code(block_items, indent_level + 1, scope_stack)
-
-                if scope_var:
-                    scope_stack.pop()
-
-                return f"{spacing}{left} {op} {{\n{block_content}{spacing}}}\n"
-
-            else:
-                if isinstance(right, str) and not right.startswith('"'):
-                    right = resolve_scopes(right, scope_stack)
-                return f"{spacing}{left} {op} {right}\n"
-
-    if isinstance(ast, (str, int, float)):
-        return f"{spacing}{ast}\n"
-
-    return ""
-
-# A macro call is `$name(` where name starts lowercase (COUNTRY_TAG is `$` +
-# uppercase, so `$GER(` never matches). Used to decide whether a changed .hml
-# forces a rebuild of a given source file.
-_MACRO_CALL_RE = re.compile(r'\$[a-z][a-zA-Z0-9_]*\s*\(')
-
-
-def _uses_macro(path):
-    """True if the source file contains at least one `$macro(` call."""
-    try:
-        with open(path, "r", encoding="utf-8-sig") as f:
-            return bool(_MACRO_CALL_RE.search(f.read()))
-    except OSError:
-        return False
-
-
-def _macro_floor(path, out_path, macros_mtime):
-    """Freshness floor for `path`: the newest-macro timestamp only applies when
-    the output is older than it AND the source actually calls a macro. Otherwise
-    macro changes are irrelevant to this file, so the floor is 0. The mtime gate
-    comes first so unaffected files never get re-read on clean builds."""
-    om = _mtime(out_path)
-    if om is not None and macros_mtime > om and _uses_macro(path):
-        return macros_mtime
-    return 0.0
-
-
-def _mtime(path):
-    """Modification time of `path`, or None if it does not exist."""
-    try:
-        return os.path.getmtime(path)
-    except OSError:
-        return None
-
-def _is_fresh(out_path, ingredient_paths, floor_mtime=0.0):
-    """
-    True if `out_path` exists and is at least as new as every ingredient.
-
-    `floor_mtime` is an extra dependency timestamp (e.g. the newest .hml macro
-    library) that applies to every output. A missing ingredient is ignored;
-    a missing output is never fresh.
-    """
-    out_m = _mtime(out_path)
-    if out_m is None:
-        return False
-    newest_dep = floor_mtime
-    for p in ingredient_paths:
-        m = _mtime(p)
-        if m is not None and m > newest_dep:
-            newest_dep = m
-    return out_m >= newest_dep
 
 def compile_fragment(lines, parser, transformer, cache=None):
     """
@@ -292,6 +73,7 @@ def compile_fragment(lines, parser, transformer, cache=None):
     if cache is not None:
         cache[src] = code
     return code
+
 
 def process_include_file(include_path, target_folder, vanilla_root, parser, transformer,
                          macros_mtime=0.0, force=False, fragment_cache=None):
@@ -335,29 +117,16 @@ def process_include_file(include_path, target_folder, vanilla_root, parser, tran
         f.write(result)
     return 'built'
 
-def compile_folder(target_folder, vanilla_root=None, force=False):
-    """
-    Recursively finds all .hsl and .include files in the specified directory and
-    all its subdirectories, then compiles them into the game's .txt files.
 
-    .hsl    - full files, compiled standalone into a sibling .txt.
-    .include - delta injections spliced into a mirrored vanilla file; requires
-               vanilla_root to locate the original .txt.
-    """
-    errors = 0
-    # Defensive: strip stray surrounding quotes (illegal in paths anyway) so a
-    # quoted vanilla root passed programmatically or via a shell quirk still works.
-    if vanilla_root:
-        vanilla_root = vanilla_root.strip().strip('"')
-    grammar_path = "modules/grammar.lark"
-    if not os.path.exists(grammar_path):
-        print(f"Error: Grammar file '{grammar_path}' not found in the project root!")
-        return False
-    # Initialize Lark
-    print(f"Loading grammar from {grammar_path}...")
-    parser = Lark.open(grammar_path, start='start', parser='lalr', postlex=HslIndenter())
-    transformer = HslTransformer()
+def _load_macro_libraries(target_folder, parser):
+    """Collect and compile every .hml macro library from the compiler's own dir
+    (the standard library) and the target folder, into a shared macro dict.
 
+    Returns (global_macros, macros_mtime) on success, or None on error (a
+    duplicate macro name or an unreadable library), after printing the reason.
+    macros_mtime is the newest library timestamp — an implicit dependency of
+    every output, since all files compile through the macro-aware transformer.
+    """
     global_macros = {} # This dictionary will store all processed macros
 
     # Recursively collect every .hml macro library. Two sources:
@@ -423,7 +192,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
                         first = os.path.relpath(macro_origin.get(name, '?'), target_folder)
                         print(f"  - '{name}' redefined in {relative_path} "
                               f"(first defined in {first})")
-                    return False
+                    return None
 
                 for name in added:
                     macro_origin[name] = hml_path
@@ -432,10 +201,77 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
 
             except Exception as e:
                 print(f"Error while reading macro library '{relative_path}': {e}")
-                return False
+                return None
 
         print(f"Successfully loaded macros: {len(global_macros)}")
 
+    return global_macros, macros_mtime
+
+def _compile_hsl_file(hsl_path, root, target_folder, parser, transformer,
+                      macros_mtime, force):
+    """Compile one standalone .hsl file into its sibling .txt.
+
+    Returns 'skipped' (up to date), 'built' (compiled), or 'error'.
+    """
+    filename = os.path.basename(hsl_path)
+    txt_path = os.path.join(root, filename.rsplit('.', 1)[0] + ".txt")
+    relative_path = os.path.relpath(hsl_path, target_folder)
+
+    # Incremental build: skip if the .txt is newer than the .hsl. A changed
+    # .hml only forces a rebuild when this file actually calls a macro.
+    floor = _macro_floor(hsl_path, txt_path, macros_mtime)
+    if not force and _is_fresh(txt_path, [hsl_path], floor):
+        return 'skipped'
+
+    print(f"Compiling: {relative_path}...")
+    try:
+        with open(hsl_path, "r", encoding="utf-8-sig") as f:
+            source_code = f.read() + "\n"
+
+        source_code = preserve_empty_lines(source_code)
+        tree = parser.parse(source_code)
+        ast_data = transformer.transform(tree)
+        final_code = generate_hoi4_code(ast_data)
+
+        # Turn indent-marker lines back into real empty lines.
+        final_code = re.sub(r'^[ \t]*#___EMPTY_LINE___$', '',
+                            final_code, flags=re.MULTILINE)
+
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(final_code)
+        return 'built'
+    except Exception as e:
+        print(f"Error in file {filename}: {e}")
+        return 'error'
+
+
+def compile_folder(target_folder, vanilla_root=None, force=False):
+    """
+    Recursively finds all .hsl and .include files in the specified directory and
+    all its subdirectories, then compiles them into the game's .txt files.
+
+    .hsl    - full files, compiled standalone into a sibling .txt.
+    .include - delta injections spliced into a mirrored vanilla file; requires
+               vanilla_root to locate the original .txt.
+    """
+    errors = 0
+    # Defensive: strip stray surrounding quotes (illegal in paths anyway) so a
+    # quoted vanilla root passed programmatically or via a shell quirk still works.
+    if vanilla_root:
+        vanilla_root = vanilla_root.strip().strip('"')
+    grammar_path = "modules/grammar.lark"
+    if not os.path.exists(grammar_path):
+        print(f"Error: Grammar file '{grammar_path}' not found in the project root!")
+        return False
+    # Initialize Lark
+    print(f"Loading grammar from {grammar_path}...")
+    parser = Lark.open(grammar_path, start='start', parser='lalr', postlex=HslIndenter())
+    transformer = HslTransformer()
+
+    loaded = _load_macro_libraries(target_folder, parser)
+    if loaded is None:
+        return False
+    global_macros, macros_mtime = loaded
     transformer.macros = global_macros
 
     if not os.path.exists(target_folder):
@@ -463,49 +299,14 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
 
         # ---- Standalone .hsl -> sibling .txt --------------------------------
         for filename in hsl_files:
-            # Build the absolute path to the source .hsl file
             hsl_path = os.path.join(root, filename)
-
-            # Generate the name and path for the output .txt file in the same subdirectory
-            txt_filename = filename.rsplit('.', 1)[0] + ".txt"
-            txt_path = os.path.join(root, txt_filename)
-
-            # Print the relative path to prettify the console output
-            relative_path = os.path.relpath(hsl_path, target_folder)
-
-            # Incremental build: skip if the .txt is newer than the .hsl. A
-            # changed .hml only forces a rebuild when this file calls a macro.
-            floor = _macro_floor(hsl_path, txt_path, macros_mtime)
-            if not force and _is_fresh(txt_path, [hsl_path], floor):
-                skipped_count += 1
-                continue
-
-            print(f"Compiling: {relative_path}...")
-
-            try:
-                with open(hsl_path, "r", encoding="utf-8-sig") as f:
-                    source_code = f.read() + "\n"
-
-                # Fill empty lines with indent-aware markers
-                source_code = preserve_empty_lines(source_code)
-
-                # Parsing, transformation, and code generation
-                tree = parser.parse(source_code)
-                ast_data = transformer.transform(tree)
-                final_code = generate_hoi4_code(ast_data)
-
-                # Strip markers from the final generated code.
-                # The regex finds all lines containing only whitespace and our marker,
-                # and replaces them with a real empty line.
-                final_code = re.sub(r'^[ \t]*#___EMPTY_LINE___$', '', final_code, flags=re.MULTILINE)
-
-                with open(txt_path, "w", encoding="utf-8") as f:
-                    f.write(final_code)
-
+            status = _compile_hsl_file(hsl_path, root, target_folder,
+                                       parser, transformer, macros_mtime, force)
+            if status == 'built':
                 compiled_count += 1
-
-            except Exception as e:
-                print(f"Error in file {filename}: {e}")
+            elif status == 'skipped':
+                skipped_count += 1
+            else:  # 'error'
                 errors += 1
 
         # ---- Delta .include -> spliced .txt ---------------------------------
