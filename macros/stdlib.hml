@@ -1,5 +1,11 @@
-macro can_build_railway(from, to):
-  raw can_build_railway: { start_state=from target_state=to }
+macro can_build_railway(_from_, _to_state_):
+  raw can_build_railway: { start_state=_from_ target_state=_to_state_ }
 
-macro compare(field, op, val):
-  raw field op val
+macro compare(_field_, _op_, _val_):
+  raw _field_ _op_ _val_
+
+macro remove_opinion_modifier(_country_, _modifier_):
+  raw remove_opinion_modifier: { target=_country_ modifier=_modifier_ }
+
+macro set_political_party(_ideology_, _popularity_):
+  raw set_political_party: { ideology=_ideology_ popularity=_popularity_ }

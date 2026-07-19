@@ -12,6 +12,17 @@ class BlocksMixin:
 
         return ("ASSIGN", block_name, "=", block_ast)
 
+    # `scope::func:` + block  ->  scope = { func = { ...block... } }.
+    # The scoped counterpart of generic_block, for engine scope-transitions that
+    # take a trigger/effect block (e.g. any_controlled_state) rather than the
+    # single argument scoped_func_call handles.
+    def scoped_block(self, items):
+        scope = str(items[0])
+        func  = str(items[1])
+        block_ast = items[-1]
+        return ("ASSIGN", scope, "=",
+                ("BLOCK", [("ASSIGN", func, "=", block_ast)]))
+
     # Bracket list-trigger: name[a, b, c] -> name = { a b c } on ONE line.
     # Emitted as RAW_INLINE so the renderer prints it inline instead of expanding
     # each element to its own line — the compact form engine list-triggers like
@@ -113,5 +124,3 @@ class BlocksMixin:
         # (loop variables are attached by linq_statement, not here), so it's None;
         # kept for a uniform BLOCK shape that downstream code can index safely.
         return ("BLOCK", processed_items, None)
-
-

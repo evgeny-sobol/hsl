@@ -30,6 +30,9 @@ class HslTransformer(
         # Store the macros dictionary in the transformer instance
         # If external_macros was passed, we use it; otherwise, we start with an empty dict
         self.macros = external_macros if external_macros is not None else {}
+        # Monotonic counter for compiler-generated temp names (e.g. randi's
+        # inclusive-max intermediate). Unique within one transform pass.
+        self._gensym = 0
 
     def start(self, items):
         # Filter out None values (which are left by macro definitions)
@@ -133,7 +136,30 @@ class HslTransformer(
         return [seed, ("ASSIGN", "unknown_math_func", "=", name)]
 
     def _lift_seq(self, stmts):
-        return [self._lift_stmt(s) for s in self._flatten(stmts)]
+        out = []
+        for s in self._flatten(stmts):
+            # A bare arithmetic expression as a statement (e.g. `clamp(x,0,1)`
+            # or `1 + 2` with no `var =`) computes a value and discards it — it
+            # emits nothing and is almost always a forgotten assignment. Fail
+            # loudly instead of silently dropping it.
+            if (isinstance(s, tuple) and len(s) == 2 and s[0] == "EXPR"
+                    and self._is_expr(s[1])):
+                raise ValueError(
+                    f"Expression '{self._expr_to_str(s[1])}' is used as a "
+                    f"statement but its result is discarded. Did you mean to "
+                    f"assign it, e.g. `<var> = {self._expr_to_str(s[1])}`?")
+            # A bare RANDCALL (rand*() used as a statement, not `var = rand*()`)
+            # is finalized here into its effect(s). rand_assign handles the
+            # assignment form before reaching this point.
+            if isinstance(s, tuple) and s and s[0] == "RANDCALL":
+                fin = self._finalize_randcall(s)
+                if isinstance(fin, list):
+                    out.extend(self._lift_stmt(x) for x in fin)
+                else:
+                    out.append(self._lift_stmt(fin))
+            else:
+                out.append(self._lift_stmt(s))
+        return out
 
     def _lift_value(self, v):
         # Rewrite a value slot: expression -> accumulator BLOCK; BLOCK -> recurse
@@ -141,9 +167,11 @@ class HslTransformer(
         if self._is_expr(v):
             return ("BLOCK", self._compile_expr(v))
         if isinstance(v, tuple) and v and v[0] == "BLOCK":
-            inner = self._flatten(v[1])
             scope_var = v[2] if len(v) > 2 else None
-            new_inner = [self._lift_stmt(ist) for ist in inner]
+            # Route the body through _lift_seq (not a bare _lift_stmt map) so the
+            # discarded-expression check and RANDCALL finalization apply inside
+            # nested blocks too, exactly as at top level.
+            new_inner = self._lift_seq(v[1])
             if scope_var is not None:
                 return ("BLOCK", new_inner, scope_var)
             return ("BLOCK", new_inner)

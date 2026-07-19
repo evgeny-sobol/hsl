@@ -52,4 +52,15 @@ class ValuesMixin:
     def math_func(self, items):
         name = str(items[0])
         args = list(items[1:])
+        if name == "abs":
+            if len(args) != 1:
+                raise ValueError(
+                    f"abs() takes exactly 1 argument, got {len(args)}: "
+                    f"'abs({', '.join(self._expr_to_str(a) for a in args)})'")
+            # abs(x) is pure sugar for sqrt(x ** 2): |x| = sqrt(x^2). Rewriting
+            # here reuses the sqrt codegen exactly, no downstream changes.
+            # (Relies on the engine's pow/root approximation, so not bit-exact,
+            # but abs is only used where small rounding is irrelevant.)
+            squared = ("MATH", "**", args[0], 2)
+            return ("MATHFN", "sqrt", [squared])
         return ("MATHFN", name, args)

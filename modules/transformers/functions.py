@@ -37,6 +37,106 @@ class FunctionsMixin:
             # If parentheses are empty, default to standard HoI4 trigger behavior ("= yes")
             return ("ASSIGN", func_name, "=", "yes")
 
+    # rand(var) / randf(var,min,max) / randi(var,min,max) -> engine random
+    # effects. Also usable as `var = rand*(...)` (see rand_assign), which the
+    # compiler rewrites to this same form with no extra temp.
+    #
+    # temp vs persistent is chosen from var's '_' prefix. The engine range is
+    # [min, max); randi makes max INCLUSIVE via max+1 (compile-time for an int
+    # literal, else a one-command accumulator temp). randf leaves max as-is.
+    # The random block and any max-temp are emitted on one line (RAW_INLINE).
+    #
+    # rand_call yields a lightweight ("RANDCALL", fname, args) node so the same
+    # data can be finalized either as a standalone statement or, via rand_assign,
+    # with the assignment's LHS spliced in as the first argument.
+    def rand_call(self, items):
+        fname = str(items[0])
+        args = [a for a in items[1:] if a is not None]
+        return ("RANDCALL", fname, args)
+
+    def _finalize_randcall(self, node):
+        # node is ("RANDCALL", fname, args); statement context finalizes it.
+        return self._build_rand(node[1], node[2])
+
+    # Sugar: `var = rand*(args)` -> prepend var as the first argument.
+    # items = [var, EQUAL_OP, ("RANDCALL", fname, args)].
+    def rand_assign(self, items):
+        var = items[0]
+        _, fname, args = items[2]
+        return self._build_rand(fname, [var] + args)
+
+    def _build_rand(self, fname, args):
+        var = self._unwrap_tag(args[0])
+        if fname == "rand":
+            if len(args) != 1:
+                raise ValueError(f"rand() takes exactly 1 argument, got {len(args)}")
+            cmd = "set_temp_variable_to_random" if self._is_temp_ref(var) else "set_variable_to_random"
+            return ("ASSIGN", cmd, "=", var)
+
+        if len(args) != 3:
+            raise ValueError(f"{fname}() takes exactly 3 arguments (var, min, max), got {len(args)}")
+        lo = self._unwrap_tag(args[1])
+        hi = self._unwrap_tag(args[2])
+        # No argument position accepts an inline arithmetic expression (the
+        # engine wants scalars/vars here); reject early with a clear message.
+        for role, a in (("var", var), ("min", lo), ("max", hi)):
+            if self._is_expr(a):
+                raise ValueError(
+                    f"{fname}(): {role} cannot be an arithmetic expression; "
+                    f"assign it to a variable first, then pass that variable.")
+        cmd = "set_temp_variable_to_random" if self._is_temp_ref(var) else "set_variable_to_random"
+
+        pre = []
+        # randi makes max INCLUSIVE via max+1; randf leaves it as-is.
+        if fname == "randf":
+            hi_val = hi
+        elif isinstance(hi, int) or (isinstance(hi, str) and self._rand_is_int_literal(hi)):
+            hi_val = int(hi) + 1
+        else:
+            # max is a variable/array ref: compute max+1 in ONE command via an
+            # accumulator value-block, rendered inline. Verified in-game
+            # (v1.19.2) that set_temp_variable accepts an accumulator block in
+            # all contexts, including inside for_loop_effect.
+            tmp = f"_hsl_randmax{self._gensym}"
+            self._gensym += 1
+            acc_body = self._inline_accumulator(self._compile_expr(("MATH", "+", hi, 1)))
+            # e.g.  _hsl_randmax0 = { value=_max add=1 }  -- one line, via RAW_INLINE.
+            pre.append(("RAW_INLINE", "set_temp_variable", f"{tmp} = {{ {acc_body} }}"))
+            hi_val = tmp
+
+        # Compact `key=value` form (no spaces around '='), which these engine
+        # effects conventionally use. Rendered on one line via RAW_INLINE.
+        parts = [f"var={var}", f"min={lo}", f"max={hi_val}"]
+        if fname == "randi":
+            parts.append("integer=yes")
+        call = ("RAW_INLINE", cmd, " ".join(parts))
+        return pre + [call] if pre else call
+
+    def _is_temp_ref(self, name):
+        # temp if the segment after any scope prefix ('.') starts with '_'.
+        return str(name).rsplit(".", 1)[-1].startswith("_")
+
+    def _inline_accumulator(self, items):
+        # Render a list of ("ASSIGN", key, "=", value) accumulator steps as a
+        # single-line `key=value key=value` string. A value that is itself a
+        # ("BLOCK", [...]) is rendered recursively as `{ ... }`, so nested
+        # accumulator blocks collapse to one line too.
+        parts = []
+        for it in items:
+            _, key, _, val = it
+            if isinstance(val, tuple) and val and val[0] == "BLOCK":
+                parts.append(f"{key} = {{ {self._inline_accumulator(val[1])} }}")
+            else:
+                parts.append(f"{key}={self._unwrap_tag(val)}")
+        return " ".join(parts)
+
+    @staticmethod
+    def _rand_is_int_literal(tok):
+        try:
+            int(str(tok)); return True
+        except (TypeError, ValueError):
+            return False
+
     def scoped_func_call(self, items):
         scope = str(items[0])   # "variable"
         func  = str(items[1])   # "can_ROOT_get_wargoal_on_THIS"
