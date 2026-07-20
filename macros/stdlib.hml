@@ -1,8 +1,8 @@
 macro add_opinion_modifier(_country_, _modifier_):
   raw add_opinion_modifier: { target=_country_ modifier=_modifier_ }
 
-macro can_build_railway(_from_, _to_state_):
-  raw can_build_railway: { start_state=_from_ target_state=_to_state_ }
+macro can_build_railway(_state_A_, _state_B_):
+  raw can_build_railway: { start_state=_state_A_ target_state=_state_B_ }
 
 macro compare(_field_, _op_, _val_):
   raw _field_ _op_ _val_

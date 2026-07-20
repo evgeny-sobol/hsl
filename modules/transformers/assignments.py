@@ -13,6 +13,25 @@ class AssignmentsMixin:
         name = self._strip_persist(var_name)
         return ("ASSIGN", cmd, "=", ("BLOCK", [("ASSIGN", name, "=", var_value)]))
 
+    # a, b, c = 1, 2, 3  ->  three separate set_[temp_]variable statements, each
+    # by its own '&' marker. The EQUAL_OP token splits targets from values.
+    def tuple_assign(self, items):
+        split = next(i for i, it in enumerate(items)
+                     if hasattr(it, "type") and it.type == "EQUAL_OP")
+        targets = items[:split]
+        values  = items[split + 1:]
+        if len(targets) != len(values):
+            raise ValueError(
+                f"Tuple assignment mismatch: {len(targets)} targets but "
+                f"{len(values)} values.")
+        out = []
+        for tgt, val in zip(targets, values):
+            name = self._check_var_name(str(tgt))
+            cmd = "set_temp_variable" if self._var_is_temp(name) else "set_variable"
+            out.append(("ASSIGN", cmd, "=",
+                        ("BLOCK", [("ASSIGN", self._strip_persist(name), "=", val)])))
+        return out
+
     # x = null  ==>  clear_variable = x
     # HoI4 has no clear_temp_variable, so clearing a temp (the default) is an
     # error; only a persistent '&'-marked variable can be cleared.

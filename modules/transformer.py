@@ -88,6 +88,40 @@ class HslTransformer(
     # name (after any scope prefix, e.g. `&foo`, `global.&foo`) marks it
     # PERSISTENT. The '&' is a compiler marker only and is stripped before the
     # name is emitted to HoI4 script.
+    def _resolve_breaks(self, block_items):
+        """Rewrite ("BREAK",) markers in a loop body into a flag-setting
+        statement, recursing into nested blocks (a break may sit inside an if).
+        Returns (new_items, flag_name_or_None). The flag is allocated once per
+        loop that contains at least one break; the caller declares it in the
+        loop header as `break = <flag>`.
+        """
+        flag = None
+
+        def walk(items):
+            nonlocal flag
+            out = []
+            for it in items:
+                if isinstance(it, tuple) and it and it[0] == "BREAK":
+                    if flag is None:
+                        flag = f"hsl_break{self._gensym}"
+                        self._gensym += 1
+                    out.append(("ASSIGN", "set_temp_variable", "=",
+                                ("BLOCK", [("ASSIGN", flag, "=", 1)])))
+                elif (isinstance(it, tuple) and len(it) == 4 and it[0] == "ASSIGN"
+                      and isinstance(it[3], tuple) and it[3] and it[3][0] == "BLOCK"):
+                    # Recurse into a nested block (e.g. an if body), preserving
+                    # any trailing scope_var element of the BLOCK tuple.
+                    blk = it[3]
+                    new_inner = walk(list(blk[1]))
+                    new_blk = ("BLOCK", new_inner) + tuple(blk[2:])
+                    out.append((it[0], it[1], it[2], new_blk))
+                else:
+                    out.append(it)
+            return out
+
+        new_items = walk(list(block_items))
+        return new_items, flag
+
     @staticmethod
     def _var_is_temp(name):
         seg = str(name).rsplit(".", 1)[-1]

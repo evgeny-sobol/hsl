@@ -1,4 +1,38 @@
 class FunctionsMixin:
+    # get_highest_scored_country(scorer, var) -> { scorer var }.
+    # Writes into `var`; a temp target (default) uses the _temp effect variant,
+    # a persistent ('&') target the plain one.
+    def scored_country(self, items):
+        scorer = self._strip_persist(str(self._unwrap_tag(items[0])))
+        var_raw = str(self._unwrap_tag(items[1]))
+        var = self._strip_persist(var_raw)
+        eff = "get_highest_scored_country_temp" if self._var_is_temp(var_raw) \
+              else "get_highest_scored_country"
+        return ("RAW_INLINE", eff, f"scorer={scorer} var={var}")
+
+    # get_sorted_scored_countries(scorer, arr[] [, scores[]]) ->
+    #   { scorer array scores? }. Both output arrays must share a lifetime
+    #   (both temp or both persistent) or they desync; that shared lifetime also
+    #   selects the _temp effect variant.
+    def sorted_countries(self, items):
+        scorer = self._strip_persist(str(self._unwrap_tag(items[0])))
+        arr    = str(items[1])
+        scores = str(items[2]) if len(items) > 2 and items[2] is not None else None
+
+        a_temp = self._var_is_temp(arr)
+        if scores is not None and a_temp != self._var_is_temp(scores):
+            raise ValueError(
+                "get_sorted_scored_countries(): the output array and scores "
+                "array must have the same lifetime — either both persistent "
+                "('&') or both temp. Mixing them desyncs the parallel arrays."
+            )
+        eff = "get_sorted_scored_countries_temp" if a_temp \
+              else "get_sorted_scored_countries"
+        parts = [f"scorer={scorer}", f"array={self._strip_persist(arr)}"]
+        if scores is not None:
+            parts.append(f"scores={self._strip_persist(scores)}")
+        return ("RAW_INLINE", eff, " ".join(parts))
+
     def func_call(self, items):
         func_name = str(items[0])
 
@@ -137,6 +171,17 @@ class FunctionsMixin:
             int(str(tok)); return True
         except (TypeError, ValueError):
             return False
+
+    # scope->$macro(args)  ->  scope = { <expanded macro body> }. The macro_call
+    # child (after the ARROW) already expanded to a list of statements; wrap it
+    # in the scope-transition block.
+    def scoped_macro_call(self, items):
+        items = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
+        scope = str(items[0])
+        body = items[1]
+        if not isinstance(body, list):
+            body = [body]
+        return ("ASSIGN", scope, "=", ("BLOCK", body))
 
     def scoped_func_call(self, items):
         # items: [scope, ARROW, func, arg?]; drop the ARROW token.

@@ -16,8 +16,11 @@ start: (_NL | item)*
      | raw_block
      | raw_stmt          _NL
      | expr_statement    _NL
+     | scored_country    _NL
+     | sorted_countries  _NL
      | func_call        _NL
      | scoped_func_call _NL
+     | scoped_macro_call _NL
      | scoped_chain      _NL
      | scoped_block
      | rand_call         _NL
@@ -26,6 +29,7 @@ start: (_NL | item)*
      | array_rand_assign _NL
      | rand_assign       _NL
      | rand_call         _NL
+     | tuple_assign      _NL
      | short_assign     _NL
      | math_assign      _NL
      | inc_dec          _NL
@@ -38,6 +42,7 @@ start: (_NL | item)*
      | array_not_check  _NL
      | not_statement    _NL
      | pass_statement   _NL
+     | break_statement  _NL
      | clear_var        _NL
      | clear_arr        _NL
      | null_check       _NL
@@ -95,6 +100,7 @@ not_statement: NOT_OP cond_atom -> logical_not
 # Python-style no-op. Produces nothing; it exists so an indentation block
 # can be syntactically non-empty (e.g. an if-branch that does nothing).
 pass_statement: "pass"
+break_statement: "break"
 
 # A bare value on its own line. Its main purpose is the body of a
 # value-macro (`macro f(): some_value`); an operator-macro call used as a
@@ -106,7 +112,17 @@ expr_statement: value
 # =============================================================================
 
 func_call:        UNQUOTED_VALUE "(" [value] ")"
+
+# Scorer effects with fixed signatures and array-typed arguments:
+#   get_highest_scored_country(scorer, var)
+#   get_sorted_scored_countries(scorer, arr[] [, scores[]])
+scored_country:   "get_highest_scored_country" "(" value "," value ")"
+sorted_countries: "get_sorted_scored_countries" "(" value "," UNQUOTED_VALUE "[]" ("," UNQUOTED_VALUE "[]")? ")"
 scoped_func_call: UNQUOTED_VALUE ARROW UNQUOTED_VALUE "(" [value] ")"
+
+# `scope->$macro(args)` — a scope transition whose body is a macro expansion:
+#   other->$add_opinion_modifier(ROOT, m)  ->  other = { <expanded body> }
+scoped_macro_call: UNQUOTED_VALUE ARROW macro_call
 
 # Multi-level scope chain A->B->...->trigger(arg) -> nested scope blocks.
 # Needs >=2 arrows so it doesn't collide with single-arrow scoped_func_call.
@@ -164,6 +180,11 @@ range_loop.3: "for" UNQUOTED_VALUE "in" RANGE_KW "(" value ("," value)~0..2 ")" 
 
 assignment:    value operator value
 short_assign:  value EQUAL_OP value
+
+# Tuple assignment sugar: `a, b, c = 1, 2, 3` -> three separate assignments,
+# each honouring its own '&' marker. Needs 2+ targets so it never collides with
+# the single-target short_assign.
+tuple_assign:  value ("," value)+ EQUAL_OP value ("," value)+
 clear_var:     value EQUAL_OP NULL
 math_assign:   value MATH_OPERATOR value
 inc_dec: value INC_DEC_OP

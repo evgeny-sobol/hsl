@@ -55,7 +55,13 @@ class LinqMixin:
         # '_' is a throwaway index placeholder вЂ” omit the index line entirely.
         if index != "_":
             new_block_items.append(("ASSIGN", "index", "=", index))
-        new_block_items += list(block_ast[1])
+
+        # Resolve any `break` in the body: allocate a flag, declare it in the
+        # header (break = <flag>), and rewrite the break markers in the body.
+        body_items, break_flag = self._resolve_breaks(list(block_ast[1]))
+        if break_flag is not None:
+            new_block_items.append(("ASSIGN", "break", "=", break_flag))
+        new_block_items += body_items
 
         return ("ASSIGN", "for_each_loop", "=", ("BLOCK", new_block_items, None))
 
@@ -85,6 +91,10 @@ class LinqMixin:
         new_block_items.append(("ASSIGN", "end", "=", end))
         if step is not None:
             new_block_items.append(("ASSIGN", "add", "=", step))
-        new_block_items += list(block_ast[1])
+
+        body_items, break_flag = self._resolve_breaks(list(block_ast[1]))
+        if break_flag is not None:
+            new_block_items.append(("ASSIGN", "break", "=", break_flag))
+        new_block_items += body_items
 
         return ("ASSIGN", "for_loop_effect", "=", ("BLOCK", new_block_items, None))
