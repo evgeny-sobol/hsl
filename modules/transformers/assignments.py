@@ -8,7 +8,8 @@ class AssignmentsMixin:
     # The '&' marker is stripped from the emitted name.
     def short_assign(self, items):
         var_name = self._check_var_name(str(items[0]))
-        var_value = items[2]
+        # A country tag reaches the RHS as ("COUNTRY_TAG", tag); emit the bare tag.
+        var_value = self._unwrap_tag(items[2])
         cmd = "set_temp_variable" if self._var_is_temp(var_name) else "set_variable"
         name = self._strip_persist(var_name)
         return ("ASSIGN", cmd, "=", ("BLOCK", [("ASSIGN", name, "=", var_value)]))
@@ -26,6 +27,7 @@ class AssignmentsMixin:
                 f"{len(values)} values.")
         out = []
         for tgt, val in zip(targets, values):
+            val = self._unwrap_tag(val)
             name = self._check_var_name(str(tgt))
             cmd = "set_temp_variable" if self._var_is_temp(name) else "set_variable"
             out.append(("ASSIGN", cmd, "=",
@@ -49,7 +51,7 @@ class AssignmentsMixin:
     def math_assign(self, items):
         var_name = self._check_var_name(str(items[0]))
         op = str(items[1])
-        value = items[2]
+        value = self._unwrap_tag(items[2])
         is_temp = self._var_is_temp(var_name)
         name = self._strip_persist(var_name)
 

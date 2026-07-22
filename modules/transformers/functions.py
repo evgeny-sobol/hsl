@@ -203,7 +203,7 @@ class FunctionsMixin:
     # in the scope-transition block.
     def scoped_macro_call(self, items):
         items = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
-        scope = str(items[0])
+        scope = self._scope_name(items[0])
         body = items[1]
         if not isinstance(body, list):
             body = [body]
@@ -212,7 +212,7 @@ class FunctionsMixin:
     def scoped_func_call(self, items):
         # items: [scope, ARROW, func, arg?]; drop the ARROW token.
         items = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
-        scope = str(items[0])
+        scope = self._scope_name(items[0])
         func  = str(items[1])
         arg   = items[2] if len(items) > 2 else None
 

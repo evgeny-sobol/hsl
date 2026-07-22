@@ -68,6 +68,20 @@ class HslTransformer(
     }
 
     @staticmethod
+    def _scope_name(v):
+        """Normalise a scope head to its bare name.
+
+        A scope head is either a plain name token (PREV, THIS, a variable) or a
+        country tag. The tag reaches scope position as a raw COUNTRY_TAG token
+        ("$HAI") rather than the ("COUNTRY_TAG", name) tuple that the value-level
+        rule produces, so strip a leading '$' here.
+        """
+        if isinstance(v, tuple) and v and v[0] == "COUNTRY_TAG":
+            return v[1]
+        s = str(v)
+        return s[1:] if s.startswith("$") else s
+
+    @staticmethod
     def _unwrap_tag(v):
         if isinstance(v, tuple) and v and v[0] == "COUNTRY_TAG":
             return v[1]

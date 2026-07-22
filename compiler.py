@@ -19,6 +19,27 @@ class HslIndenter(Indenter):
     tab_len = 2
 
 
+def _strip_trailing_comment(line):
+    """Drop a trailing `# ...` comment from a code line.
+
+    A line that is *only* a comment is left alone: those are real statements
+    (the `comment` rule) and survive into the generated script. A '#' inside a
+    double-quoted string is not a comment.
+    """
+    if line.lstrip().startswith('#'):
+        return line
+    in_str = False
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if c == '"' and (i == 0 or line[i - 1] != '\\'):
+            in_str = not in_str
+        elif c == '#' and not in_str:
+            return line[:i].rstrip()
+        i += 1
+    return line
+
+
 def preserve_empty_lines(source_code):
     """
     Finds all empty lines and inserts a hidden comment into each one,
@@ -26,6 +47,10 @@ def preserve_empty_lines(source_code):
     This prevents HslIndenter from breaking the block structure.
     """
     lines = source_code.splitlines()
+    # Trailing comments are stripped before parsing: the grammar only allows a
+    # comment as its own statement, and threading an optional comment through
+    # every statement rule is far more fragile than removing it here.
+    lines = [_strip_trailing_comment(l) for l in lines]
     for i in range(len(lines)):
         if lines[i].strip() == '':
             indent = ""

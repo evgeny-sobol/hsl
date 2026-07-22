@@ -85,6 +85,19 @@ class ConditionsMixin:
         if op_str == "==":
             op_str = "="
 
+        # The engine's infix form only understands =, > and <. The remaining
+        # operators need the explicit long form with a `compare` type.
+        # (Wiki: check_variable compare types.)
+        _COMPARE_TYPES = {
+            ">=": "greater_than_or_equals",
+            "<=": "less_than_or_equals",
+            "!=": "not_equals",
+        }
+        cmp_type = _COMPARE_TYPES.get(op_str)
+        if cmp_type is not None:
+            return ("RAW_INLINE", "check_variable",
+                    f"var={left} value={right} compare={cmp_type}")
+
         return ("ASSIGN", "check_variable", "=", ("BLOCK", [("ASSIGN", left, op_str, right)]))
 
     # NULL CHECK: var == null  /  var != null

@@ -129,20 +129,23 @@ func_all:         UNQUOTED_VALUE "(" value (AMP_OP value)+ ")"
 #   get_sorted_scored_countries(scorer, arr[] [, scores[]])
 scored_country:   "get_highest_scored_country" "(" value "," value ")"
 sorted_countries: "get_sorted_scored_countries" "(" value "," UNQUOTED_VALUE "[]" ("," UNQUOTED_VALUE "[]")? ")"
-scoped_func_call: UNQUOTED_VALUE ARROW UNQUOTED_VALUE "(" [value] ")"
+# A scope head is a plain scope name (PREV, THIS, a variable) or a country tag.
+?scope_head: UNQUOTED_VALUE | COUNTRY_TAG
+
+scoped_func_call: scope_head ARROW UNQUOTED_VALUE "(" [value] ")"
 
 # `scope->$macro(args)` — a scope transition whose body is a macro expansion:
 #   other->$add_opinion_modifier(ROOT, m)  ->  other = { <expanded body> }
-scoped_macro_call: UNQUOTED_VALUE ARROW macro_call
+scoped_macro_call: scope_head ARROW macro_call
 
 # Multi-level scope chain A->B->...->trigger(arg) -> nested scope blocks.
 # Needs >=2 arrows so it doesn't collide with single-arrow scoped_func_call.
-scoped_chain: UNQUOTED_VALUE ARROW UNQUOTED_VALUE (ARROW UNQUOTED_VALUE)+ "(" [value] ")"
+scoped_chain: scope_head ARROW UNQUOTED_VALUE (ARROW UNQUOTED_VALUE)+ "(" [value] ")"
 
 # `scope::func:` opening a block (vs scoped_func_call's `scope::func(arg)`).
 # For engine scope-transitions that take a trigger/effect block rather than a
 # single argument, e.g. THIS::any_controlled_state: -> THIS = { any_controlled_state = { ... } }
-scoped_block: UNQUOTED_VALUE ARROW UNQUOTED_VALUE block
+scoped_block: scope_head ARROW UNQUOTED_VALUE block
 
 # One-line form of a prefixed scope + trigger:
 #   var:NAME[i]::func(arg)  ->  var:NAME^i = { func = arg }

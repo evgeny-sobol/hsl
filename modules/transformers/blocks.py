@@ -18,7 +18,7 @@ class BlocksMixin:
     # single argument scoped_func_call handles.
     def scoped_block(self, items):
         items = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
-        scope = str(items[0])
+        scope = self._scope_name(items[0])
         func  = str(items[1])
         block_ast = items[-1]
         return ("ASSIGN", scope, "=",
@@ -31,16 +31,23 @@ class BlocksMixin:
     def scoped_chain(self, items):
         # Drop ARROW tokens; remaining are name tokens plus an optional arg.
         parts = [it for it in items if not (hasattr(it, "type") and it.type == "ARROW")]
-        # Names are UNQUOTED_VALUE tokens; the arg (if any) is the one non-None
-        # element that is not such a token (empty `()` -> default "yes").
         parts = [p for p in parts if p is not None]
-        name_toks = [p for p in parts if hasattr(p, "type") and p.type == "UNQUOTED_VALUE"]
-        non_names = [p for p in parts if not (hasattr(p, "type") and p.type == "UNQUOTED_VALUE")]
+
+        # Chain elements are UNQUOTED_VALUE tokens; the head may also be a
+        # COUNTRY_TAG (e.g. $HAI->...), which arrives as a ("COUNTRY_TAG", tag)
+        # tuple. Anything else is the trailing argument (empty `()` -> "yes").
+        def is_name(p):
+            if hasattr(p, "type") and p.type in ("UNQUOTED_VALUE", "COUNTRY_TAG"):
+                return True
+            return isinstance(p, tuple) and len(p) == 2 and p[0] == "COUNTRY_TAG"
+
+        name_toks = [p for p in parts if is_name(p)]
+        non_names = [p for p in parts if not is_name(p)]
         arg = non_names[0] if non_names else "yes"
         if isinstance(arg, tuple) and arg and arg[0] == "COUNTRY_TAG":
             arg = arg[1]
 
-        *scopes, trigger = [str(t) for t in name_toks]
+        *scopes, trigger = [self._scope_name(t) for t in name_toks]
         node = ("ASSIGN", trigger, "=", arg)   # innermost trigger
         for sc in reversed(scopes):            # wrap in each scope, outward
             node = ("ASSIGN", sc, "=", ("BLOCK", [node]))
