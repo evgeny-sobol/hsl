@@ -18,6 +18,8 @@ start: (_NL | item)*
      | expr_statement    _NL
      | scored_country    _NL
      | sorted_countries  _NL
+     | func_any         _NL
+     | func_all         _NL
      | func_call        _NL
      | scoped_func_call _NL
      | scoped_macro_call _NL
@@ -80,7 +82,9 @@ condition:     conj_element (OR_OP conj_element)*
 ?conj_element: not_element (AND_OP not_element)*
 ?not_element:  NOT_OP cond_atom -> logical_not
             |  cond_atom
-?cond_atom:    func_call
+?cond_atom:    func_any
+          |    func_all
+          |    func_call
           |    scoped_func_call
           |    bracket_list
           |    var_check
@@ -112,6 +116,13 @@ expr_statement: value
 # =============================================================================
 
 func_call:        UNQUOTED_VALUE "(" [value] ")"
+
+# "any of" / "all of" sugar for a trigger tested against several values:
+#   trigger(a | b | c) -> OR  = { trigger=a trigger=b trigger=c }
+#   trigger(a & b & c) -> AND = { trigger=a trigger=b trigger=c }
+# Each needs >=1 separator so neither collides with the single-arg func_call.
+func_any:         UNQUOTED_VALUE "(" value (PIPE_OP value)+ ")"
+func_all:         UNQUOTED_VALUE "(" value (AMP_OP value)+ ")"
 
 # Scorer effects with fixed signatures and array-typed arguments:
 #   get_highest_scored_country(scorer, var)
@@ -355,6 +366,7 @@ AND_OP:                "and"
 OR_OP:                 "or"
 # Pattern separator in `case a | b:`. Distinct from OR_OP ("or"), so no clash.
 PIPE_OP:               "|"
+AMP_OP:                "&"
 
 # =============================================================================
 # TERMINALS вЂ” VALUES & NAMES

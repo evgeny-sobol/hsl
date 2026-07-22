@@ -23,6 +23,9 @@ century /= 2
 &scratch = 7
 &scratch = null
 
+# Tuple assignment: one statement per pair, each by its own `&` marker.
+&budget, rand_min, rand_max = 100, 26, 30
+
 
 # -----------------------------------------------------------------------------
 # Arithmetic expressions (operator precedence, parentheses, math builtins)
@@ -158,6 +161,19 @@ PREV->any_controlled_state->is_on_continent(south_america)
 FROM->every_owned_state:
   add_extra_state_shared_building_slots(1)
 
+# "any of" / "all of" sugar: `|` expands to OR, `&` to AND, repeating the
+# trigger for each value.
+if has_country_leader_ideology(despotism | oligarchism):
+  log("Despotic or oligarchic leader")
+if has_idea(idea_a & idea_b):
+  log("Has both ideas")
+
+# Scorer effects. A temp target (default) selects the _temp engine variant; a
+# persistent (`&`) target the plain one. For sorted, the output array and the
+# optional scores array must share a lifetime.
+get_highest_scored_country(democratic_scorer, largest_democracy)
+get_sorted_scored_countries(democratic_scorer, &democracies[], &democracy_scores[])
+
 weight = mtth:base_weight
 saved  = var:cached_value
 
@@ -171,6 +187,9 @@ macro grant_boost(_amount_):
 
 $grant_boost(0.05)
 
+# `scope->$macro(args)` expands the macro body inside that scope transition.
+FROM->$grant_boost(0.02)
+
 
 # -----------------------------------------------------------------------------
 # LINQ-style iteration with filtering
@@ -183,6 +202,14 @@ for cty in every_country():
 # Indexed array iteration: `for value, index in arr[]:` (use _ to drop index).
 for foe, idx in enemies[]:
   log("enemy [?idx]: [?foe]")
+
+# `break` leaves the loop: the compiler declares a unique flag in the loop
+# header and sets it here. Works inside nested ifs; nested loops get separate
+# flags.
+for foe, idx in enemies[]:
+  if foe == USA:
+    found_at = idx
+    break
 
 
 # -----------------------------------------------------------------------------

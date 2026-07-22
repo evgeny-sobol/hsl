@@ -33,6 +33,32 @@ class FunctionsMixin:
             parts.append(f"scores={self._strip_persist(scores)}")
         return ("RAW_INLINE", eff, " ".join(parts))
 
+    # trigger(a | b | c) -> OR  = { trigger=a ... }  ("any of")
+    # trigger(a & b & c) -> AND = { trigger=a ... }  ("all of")
+    # AND is only meaningful for triggers whose value isn't exclusive (e.g.
+    # has_idea); for single-valued triggers it's always false.
+    def func_any(self, items):
+        return self._func_multi(items, "OR", "PIPE_OP")
+
+    def func_all(self, items):
+        return self._func_multi(items, "AND", "AMP_OP")
+
+    def _func_multi(self, items, joiner, sep_type):
+        name = str(items[0])
+        vals = [it for it in items[1:]
+                if not (hasattr(it, "type") and it.type == sep_type)]
+        clauses = []
+        for v in vals:
+            if isinstance(v, tuple) and v and v[0] == "COUNTRY_TAG":
+                v = v[1]
+            if self._is_expr(v):
+                raise ValueError(
+                    f"'{name}(...)': arithmetic expressions can't be used as an "
+                    f"'{'any' if joiner == 'OR' else 'all'} of' value; assign it "
+                    f"to a variable first.")
+            clauses.append(("ASSIGN", name, "=", v))
+        return ("ASSIGN", joiner, "=", ("BLOCK", clauses))
+
     def func_call(self, items):
         func_name = str(items[0])
 
