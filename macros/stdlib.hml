@@ -1,14 +1,215 @@
+macro add_ai_strategy(_type_, _country_, _weight_):
+  add_ai_strategy:
+    type(_type_)
+    id(_country_)
+    value(_weight_)
+
+macro add_dynamic_modifier(_modifier_, _scope_=null, _days_=null):
+  add_dynamic_modifier:
+    modifier(_modifier_)
+    if defined(_scope_):
+      scope(_scope_)
+    if defined(_days_):
+      days(_days_)
+macro remove_dynamic_modifier(_modifier_):
+  remove_dynamic_modifier:
+    modifier(_modifier_)
+
 macro add_opinion_modifier(_country_, _modifier_):
-  raw add_opinion_modifier: { target=_country_ modifier=_modifier_ }
+  add_opinion_modifier:
+    target(_country_)
+    modifier(_modifier_)
+macro add_relation_modifier(_country_, _modifier_):
+  add_relation_modifier:
+    target(_country_)
+    modifier(_modifier_)
+macro remove_opinion_modifier(_country_, _modifier_):
+  remove_opinion_modifier:
+    target(_country_)
+    modifier(_modifier_)
+macro remove_relation_modifier(_country_, _modifier_):
+  remove_relation_modifier:
+    target(_country_)
+    modifier(_modifier_)
+
+macro add_popularity(_ideology_or_tag_, _amount_):
+  add_popularity:
+    ideology(_ideology_or_tag_)
+    popularity(_amount_) # Values used are 0.0 to 1.0
+
+macro add_to_array(_array_, _value_, _index_=null):
+  add_to_array:
+    array(_array_)
+    value(_value_)
+    if defined(_index_):
+      index(_index_)
+macro remove_from_array(_array_, _value_=null, _index_=null):
+  remove_from_array:
+    array(_array_)
+    if defined(_value_):
+      value(_value_)
+    if defined(_index_):
+      index(_index_)
+macro resize_array(_array_, _size_, _value_=null):
+  resize_array:
+    array(_array_)
+    size(_size_)
+    if defined(_value_):
+      value(_value_)
 
 macro can_build_railway(_state_A_, _state_B_):
-  raw can_build_railway: { start_state=_state_A_ target_state=_state_B_ }
+  can_build_railway:
+    start_state(_state_A_)
+    target_state(_state_B_)
 
 macro compare(_field_, _op_, _val_):
   raw _field_ _op_ _val_
 
-macro remove_opinion_modifier(_country_, _modifier_):
-  raw remove_opinion_modifier: { target=_country_ modifier=_modifier_ }
+macro compare_ideology_with_faction(_leader_, _amount_):
+  compare_ideology_with_faction:
+    leader(_leader_)
+    raw value > _amount_
+
+macro focus_progress(_focus_, _progress_, _op_=">"):
+  focus_progress:
+    focus(_focus_)
+    raw progress _op_ _progress_
+
+macro has_built(_building_, _amount_, _op_=">"):
+  has_built:
+    type(_building_)
+    raw value _op_ _amount_
+
+macro has_opinion(_country_, _amount_, _op_=">"):
+  has_opinion:
+    target(_country_)
+    raw value _op_ _amount_
+
+macro has_country_flag(_flag_, _value_=null, _date_=null, _days_=null):
+  has_country_flag:
+    flag(_flag_)
+    if defined(_value_):
+      raw value > _value_
+    if defined(_date_):
+      raw date > _date_
+    if defined(_days_):
+      raw days > _days_
+macro has_global_flag(_flag_, _value_=null, _date_=null, _days_=null):
+  has_global_flag:
+    flag(_flag_)
+    if defined(_value_):
+      raw value > _value_
+    if defined(_date_):
+      raw date > _date_
+    if defined(_days_):
+      raw days > _days_
+
+macro has_dynamic_modifier(_modifier_, _country_=null):
+  has_dynamic_modifier:
+    modifier(_modifier_)
+    if defined(_country_):
+      scope(_country_)
+
+macro has_relation_modifier(_country_, _modifier_):
+  has_relation_modifier:
+    target(_country_)
+    modifier(_modifier_)
+
+macro set_character_flag(_flag_, _value_, _days_=null):
+  set_character_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro set_country_flag(_flag_, _value_, _days_=null):
+  set_country_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro set_global_flag(_flag_, _value_, _days_=null):
+  set_global_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro set_state_flag(_flag_, _value_, _days_=null):
+  set_state_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro modify_character_flag(_flag_, _value_=0, _days_=null):
+  modify_character_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro modify_country_flag(_flag_, _value_=0, _days_=null):
+  modify_country_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro modify_global_flag(_flag_, _value_=0, _days_=null):
+  modify_global_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro modify_state_flag(_flag_, _value_=0, _days_=null):
+  modify_state_flag:
+    flag(_flag_)
+    value(_value_)
+    if defined(_days_):
+      days(_days_)
+macro clear_character_flag(_flag_):
+  clr_character_flag(_flag_)
+macro clear_country_flag(_flag_):
+  clr_country_flag(_flag_)
+macro clear_global_flag(_flag_):
+  clr_global_flag(_flag_)
+macro clear_state_flag(_flag_):
+  clr_state_flag(_flag_)
 
 macro set_political_party(_ideology_, _popularity_):
-  raw set_political_party: { ideology=_ideology_ popularity=_popularity_ }
+  set_political_party:
+    ideology(_ideology_)
+    popularity(_popularity_) # Values used are 0 to 100
+
+macro set_variable(_var_, _value_, _tooltip_=null):
+  set_variable:
+    var(_var_)
+    value(_value_)
+    if defined(_tooltip_):
+      tooltip(_tooltip_)
+macro add_to_variable(_var_, _value_, _tooltip_=null):
+  add_to_variable:
+    var(_var_)
+    value(_value_)
+    if defined(_tooltip_):
+      tooltip(_tooltip_)
+macro subtract_from_variable(_var_, _value_, _tooltip_=null):
+  subtract_from_variable:
+    var(_var_)
+    value(_value_)
+    if defined(_tooltip_):
+      tooltip(_tooltip_)
+macro multiply_variable(_var_, _value_, _tooltip_=null):
+  multiply_variable:
+    var(_var_)
+    value(_value_)
+    if defined(_tooltip_):
+      tooltip(_tooltip_)
+macro divide_variable(_var_, _value_, _tooltip_=null):
+  divide_variable:
+    var(_var_)
+    value(_value_)
+    if defined(_tooltip_):
+      tooltip(_tooltip_)
+macro modulo_variable(_var_, _value_, _tooltip_=null):
+  modulo_variable:
+    var(_var_)
+    value(_value_)
+    if defined(_tooltip_):
+      tooltip(_tooltip_)

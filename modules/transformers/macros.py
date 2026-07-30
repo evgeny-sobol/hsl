@@ -87,14 +87,78 @@ class MacrosMixin:
         # Create a mapping dictionary: {'country': 'SWE', 'amount': '50'}
         param_map = dict(zip(param_names, effective_args))
 
-        # Return a deep-copied AST with all variables replaced!
+        # Parameters the CALLER actually supplied (defaults don't count) — this
+        # is what `if defined(_p_):` tests at compile time.
+        provided = set(param_names[:len(args)])
+
+        # Resolve compile-time `if defined(...)` blocks first, then substitute.
+        body = self._resolve_defined(body, provided)
         return self._replace_args_in_ast(body, param_map)
+
+    # Compile-time `if defined(_p_):` — the block is kept (spliced inline,
+    # without the `if`) when every parameter it names was supplied at the call
+    # site, and dropped entirely otherwise. Nothing survives into the output.
+    def _resolve_defined(self, node, provided):
+        if isinstance(node, list):
+            out = []
+            for child in node:
+                r = self._resolve_defined(child, provided)
+                if r is None:
+                    continue
+                out.extend(r) if isinstance(r, list) else out.append(r)
+            return out
+
+        if not (isinstance(node, tuple) and len(node) == 4
+                and node[0] == "ASSIGN" and node[1] == "if"
+                and isinstance(node[3], tuple) and node[3][0] == "BLOCK"):
+            # Not an `if` — but a nested block may contain one, so recurse into
+            # any BLOCK payload (e.g. `add_dynamic_modifier:` wrapping the ifs).
+            if (isinstance(node, tuple) and len(node) == 4
+                    and isinstance(node[3], tuple) and node[3][0] == "BLOCK"):
+                inner = self._resolve_defined(list(node[3][1]), provided)
+                return (node[0], node[1], node[2],
+                        ("BLOCK", inner) + tuple(node[3][2:]))
+            return node
+
+        items = list(node[3][1])
+        names = self._defined_names(items)
+        if names is None:
+            # A normal runtime `if` — just recurse into its body.
+            new_items = self._resolve_defined(items, provided)
+            return ("ASSIGN", "if", "=", ("BLOCK", new_items) + tuple(node[3][2:]))
+
+        # Drop the limit clause; keep the rest only if every name was provided.
+        body_items = [it for it in items
+                      if not (isinstance(it, tuple) and len(it) == 4
+                              and it[1] == "limit")]
+        if not all(n in provided for n in names):
+            return None
+        return self._resolve_defined(body_items, provided)
+
+    @staticmethod
+    def _defined_names(items):
+        """Return the parameter names tested by a `defined(...)` limit block,
+        or None when this `if` isn't a compile-time defined() test."""
+        for it in items:
+            if (isinstance(it, tuple) and len(it) == 4 and it[1] == "limit"
+                    and isinstance(it[3], tuple) and it[3][0] == "BLOCK"):
+                names = []
+                for cond in it[3][1]:
+                    if (isinstance(cond, tuple) and len(cond) == 4
+                            and cond[1] == "defined"):
+                        names.append(str(cond[3]))
+                    else:
+                        return None          # mixed with real conditions
+                return names or None
+        return None
 
     # One parameter: name with an optional default value.
     # Returns (name, default) where default is None when absent.
     def macro_param(self, items):
         name = str(items[0])
-        default = items[1] if len(items) > 1 else None
+        # items is [NAME] or [NAME, EQUAL_OP, <default>] — the EQUAL_OP token is
+        # kept here, so the default is the LAST element, not items[1].
+        default = items[-1] if len(items) > 1 else None
         return (name, default)
 
     # Helper to unpack parameters — a list of (name, default) tuples.
@@ -117,6 +181,10 @@ class MacrosMixin:
             new_str = node
             # Loop through all parameters and replace them with passed arguments
             for param, arg in unwrapped_map.items():
+                # `{param}` interpolates *inside* an identifier and the braces are
+                # consumed: LocKey_x_{_c_}_tt -> LocKey_x_ROOT_tt. Needed because
+                # the \b form below can't match between underscores.
+                new_str = new_str.replace("{" + str(param) + "}", str(arg))
                 # \b matches word boundaries, so 'var' won't replace 'my_var'
                 pattern = r'\b' + re.escape(str(param)) + r'\b'
                 new_str = re.sub(pattern, str(arg), new_str)
@@ -153,5 +221,3 @@ class MacrosMixin:
 
         else:
             return node
-
-
