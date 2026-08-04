@@ -40,12 +40,110 @@ def _strip_trailing_comment(line):
     return line
 
 
+# ---------------------------------------------------------------------------
+# Line continuations
+# ---------------------------------------------------------------------------
+# Join physical lines into one logical line BEFORE HslIndenter runs, so a
+# trailing operator (or explicit backslash) does not produce a spurious _NL
+# that ends the statement. Longer suffixes first so '**' wins over '*', etc.
+_CONTINUATION_SUFFIXES = (
+    '**=', '+=', '-=', '*=', '/=',
+    '**', '==', '!=', '<=', '>=',
+    '->',
+    '+', '-', '*', '/', '%',
+    '=', '<', '>',
+    ',',
+    'and', 'or',
+)
+
+
+def _ends_inside_string(s):
+    """True if `s` ends while still inside a double-quoted string."""
+    in_str = False
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == '"' and (i == 0 or s[i - 1] != '\\'):
+            in_str = not in_str
+        i += 1
+    return in_str
+
+
+def _code_ends_with_continuation(code):
+    """True if `code` (comment already stripped) ends with a joinable operator."""
+    s = code.rstrip()
+    if not s:
+        return False
+    # Do not treat an unterminated string as a continuation carrier.
+    if _ends_inside_string(s):
+        return False
+    for suf in _CONTINUATION_SUFFIXES:
+        if not s.endswith(suf):
+            continue
+        if suf.isalpha():
+            # Word boundary: 'standard' must not match suffix 'and'.
+            before = s[:-len(suf)]
+            if before and (before[-1].isalnum() or before[-1] == '_'):
+                continue
+            return True
+        return True
+    return False
+
+
+def join_line_continuations(source_code):
+    """Merge physical lines that continue an expression into one logical line.
+
+    Two forms (both Python-flavoured):
+      1. Explicit backslash:  `expr \\` + newline
+      2. Trailing operator:   `expr /`  + newline   (the common HSL case)
+
+    Runs before empty-line markers and before HslIndenter, so the indenter
+    never sees a fake indent on the continuation line and never emits _NL
+    in the middle of the expression.
+    """
+    lines = source_code.splitlines()
+    if not lines:
+        return source_code
+
+    out = []
+    buf = lines[0]
+
+    for nxt in lines[1:]:
+        # Full-line comments are real statements — never glue onto them.
+        if buf.lstrip().startswith('#'):
+            out.append(buf)
+            buf = nxt
+            continue
+
+        code = _strip_trailing_comment(buf).rstrip()
+
+        # 1) backslash-continuation (ignore if the '\\' sits inside a string)
+        if code.endswith('\\') and not _ends_inside_string(code[:-1]):
+            buf = code[:-1].rstrip() + ' ' + nxt.lstrip()
+            continue
+
+        # 2) operator-continuation
+        if _code_ends_with_continuation(code):
+            buf = code + ' ' + nxt.lstrip()
+            continue
+
+        out.append(buf)
+        buf = nxt
+
+    out.append(buf)
+    return '\n'.join(out)
+
+
 def preserve_empty_lines(source_code):
     """
     Finds all empty lines and inserts a hidden comment into each one,
     copying the indentation level from the next non-empty line.
     This prevents HslIndenter from breaking the block structure.
     """
+    # Flatten expression continuations first so Indenter never sees a
+    # mid-expression newline (or a bogus indent on the next physical line).
+    source_code = join_line_continuations(source_code)
+
     lines = source_code.splitlines()
     # Trailing comments are stripped before parsing: the grammar only allows a
     # comment as its own statement, and threading an optional comment through
@@ -152,11 +250,11 @@ def _load_macro_libraries(target_folder, parser):
     macros_mtime is the newest library timestamp — an implicit dependency of
     every output, since all files compile through the macro-aware transformer.
     """
-    global_macros = {} # This dictionary will store all processed macros
+    global_macros = {}  # This dictionary will store all processed macros
 
     # Recursively collect every .hml macro library. Two sources:
-    #   1. the compiler's own directory (the macro "standard library"), and
-    #   2. the target folder (project-local macros).
+    # 1. the compiler's own directory (the macro "standard library"), and
+    # 2. the target folder (project-local macros).
     # Deduped by real path so a target inside the compiler dir isn't scanned twice.
     # Sorted for a deterministic load order, so cross-file overrides are predictable.
     stdlib_dir = os.path.dirname(os.path.abspath(__file__))
@@ -185,50 +283,50 @@ def _load_macro_libraries(target_folder, parser):
     if hml_paths:
         print(f"Found macro libraries: {len(hml_paths)}. Loading...")
 
-        # A single transformer fills the shared global_macros dict across all files
-        hml_transformer = HslTransformer(external_macros=global_macros)
+    # A single transformer fills the shared global_macros dict across all files
+    hml_transformer = HslTransformer(external_macros=global_macros)
 
-        macro_origin = {}  # macro name -> file that first defined it
+    macro_origin = {}  # macro name -> file that first defined it
 
-        for hml_path in hml_paths:
-            relative_path = os.path.relpath(hml_path, target_folder)
-            try:
-                with open(hml_path, "r", encoding="utf-8-sig") as f:
-                    hml_code = f.read()
+    for hml_path in hml_paths:
+        relative_path = os.path.relpath(hml_path, target_folder)
+        try:
+            with open(hml_path, "r", encoding="utf-8-sig") as f:
+                hml_code = f.read()
 
-                hml_code = preserve_empty_lines(hml_code)
-                # Parse the HML code into an AST tree using our grammar
-                hml_tree = parser.parse(hml_code)
+            hml_code = preserve_empty_lines(hml_code)
+            # Parse the HML code into an AST tree using our grammar
+            hml_tree = parser.parse(hml_code)
 
-                # Snapshot before transforming, so we can report what this file
-                # contributes and detect duplicate macro names across files.
-                before = dict(global_macros)
-                hml_transformer.transform(hml_tree)
+            # Snapshot before transforming, so we can report what this file
+            # contributes and detect duplicate macro names across files.
+            before = dict(global_macros)
+            hml_transformer.transform(hml_tree)
 
-                added      = [k for k in global_macros if k not in before]
-                overridden = [k for k in global_macros
-                              if k in before and global_macros[k] is not before[k]]
+            added = [k for k in global_macros if k not in before]
+            overridden = [k for k in global_macros
+                          if k in before and global_macros[k] is not before[k]]
 
-                # Duplicate macro definitions are a hard error: the standard
-                # library and project macros share one namespace.
-                if overridden:
-                    print("Error: duplicate macro definition(s):")
-                    for name in sorted(overridden):
-                        first = os.path.relpath(macro_origin.get(name, '?'), target_folder)
-                        print(f"  - '{name}' redefined in {relative_path} "
-                              f"(first defined in {first})")
-                    return None
-
-                for name in added:
-                    macro_origin[name] = hml_path
-
-                print(f"  - {relative_path}: +{len(added)} macro(s)")
-
-            except Exception as e:
-                print(f"Error while reading macro library '{relative_path}': {e}")
+            # Duplicate macro definitions are a hard error: the standard
+            # library and project macros share one namespace.
+            if overridden:
+                print("Error: duplicate macro definition(s):")
+                for name in sorted(overridden):
+                    first = os.path.relpath(macro_origin.get(name, '?'), target_folder)
+                    print(f"  - '{name}' redefined in {relative_path} "
+                          f"(first defined in {first})")
                 return None
 
-        print(f"Successfully loaded macros: {len(global_macros)}")
+            for name in added:
+                macro_origin[name] = hml_path
+
+            print(f"  - {relative_path}: +{len(added)} macro(s)")
+
+        except Exception as e:
+            print(f"Error while reading macro library '{relative_path}': {e}")
+            return None
+
+    print(f"Successfully loaded macros: {len(global_macros)}")
 
     return global_macros, macros_mtime
 
@@ -275,7 +373,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
     Recursively finds all .hsl and .include files in the specified directory and
     all its subdirectories, then compiles them into the game's .txt files.
 
-    .hsl    - full files, compiled standalone into a sibling .txt.
+    .hsl     - full files, compiled standalone into a sibling .txt.
     .include - delta injections spliced into a mirrored vanilla file; requires
                vanilla_root to locate the original .txt.
     """
@@ -315,7 +413,7 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
     # Use os.walk to recursively traverse all subdirectories
     # root - current directory, dirs - list of subdirectories, files - files within it
     for root, dirs, files in os.walk(target_folder):
-        hsl_files     = [f for f in files if f.endswith('.hsl')]
+        hsl_files = [f for f in files if f.endswith('.hsl')]
         include_files = [f for f in files if f.endswith('.include')]
 
         # Skip only directories that have neither kind of source file.
@@ -396,8 +494,8 @@ if __name__ == "__main__":
         if arg in ('-f', '--force'):
             force = True
         else:
-            # Strip stray quotes: on Windows a trailing '\' before the closing
-            # quote (e.g. "C:\...\Hearts of Iron IV\") escapes the quote, leaving
+            # Strip stray quotes: on Windows a trailing '\\' before the closing
+            # quote (e.g. "C:\\...\\Hearts of Iron IV\\") escapes the quote, leaving
             # a literal '"' embedded in the argument. Quotes are illegal in paths
             # anyway, so stripping them from the ends is always safe.
             positional.append(arg.strip().strip('"'))
