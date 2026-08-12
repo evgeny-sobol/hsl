@@ -359,7 +359,7 @@ INLINE_RAW.2:          /\{[^{}\n]*\}/
 # `var:NAME` / `token:NAME` / `mtth:NAME` matched as ONE token (prefix glued to
 # ':'), so a bare `var` / `token` / `mtth` used as a key or function name
 # (var(...), var=honor_stat) is NOT captured and stays an ordinary identifier.
-PREFIXED_REF.3:        /(var|token|mtth):[A-Za-z0-9_.@]+/
+PREFIXED_REF.3:        /(var|token|mtth|event_target):[A-Za-z0-9_.@]+/
 # `raw` block marker. Lookahead guards the word boundary so an identifier like
 # `raw_score` or `rawdata` is NOT captured вЂ” only a standalone `raw`.
 RAW_KW.3:              /raw(?![A-Za-z0-9_])/

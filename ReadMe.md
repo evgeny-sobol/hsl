@@ -28,17 +28,38 @@ modifier = {
 
 ## Features
 
-- **Arithmetic expressions** with full operator precedence and parentheses — `+ - * / % **`, plus `sqrt`, `round`, `clamp`. Compiles to nested accumulator value-blocks, no manual temp-variable scaffolding.
-- **Control flow** — `if` / `elif` / `else`, `while`, and `match` / `case` (with `|` patterns and a `_` default).
+- **Arithmetic expressions** with full operator precedence and parentheses — `+ - * / % **`, plus `sqrt`, `abs`, `round`, `clamp`. Compiles to nested accumulator value-blocks, no manual temp-variable scaffolding.
+- **Line continuations** — a trailing operator (`+ - * / % ** = ==` …) or an explicit `\` joins the next physical line into one logical expression (Python-style). Safe inside strings and full-line comments.
+- **Control flow** — `if` / `elif` / `else`, `while`, `break`, and `match` / `case` (with `|` patterns and a `_` default).
 - **Loops** — numeric `for x in range(...)`, scope iteration `for c in every_country()`, and indexed array iteration `for value, index in arr[]`.
-- **Arrays** — add / remove / clear, indexing, size, min/max, and `in` / `not in` membership tests.
-- **Variables** — persistent and temp (`_`-prefixed), compound assignment, `++`/`--`, `null` clearing.
-- **Macros** — compile-time expansion with default arguments and a reusable standard library.
-- **LINQ-style filtering** — `every_country().which(<condition>)`.
+- **Arrays** — add / erase / remove_at / pop / clear / resize, indexing, size, min/max, `rand` / `rand_idx`, and `in` / `not in` membership tests.
+- **Variables** — temp by default; a leading `&` marks persistent. Compound assignment, `++`/`--`, tuple assign (`a, b = 1, 2`), `null` clearing.
+- **Scoped calls** — `scope->trigger(arg)`, multi-level chains `A->B->C(x)`, block form `scope->name:`, country-tag heads (`$GER->...`), and `scope->$macro(args)`.
+- **Trigger sugar** — `trigger(a | b | c)` → OR, `trigger(a & b & c)` → AND.
+- **Macros** — compile-time expansion with default arguments, optional params via `if defined(_p_):`, `{param}` brace-interpolation inside identifiers, and a reusable standard library.
+- **LINQ-style filtering** — `every_country().which()`.
+- **Scorers** — `get_highest_scored_country`, `get_sorted_scored_countries`.
 - **`raw` escape hatch** — pass verbatim Clausewitz through untouched for anything HSL doesn't model natively.
 - **`.include` delta system** — inject changes into vanilla HoI4 files without copying them.
+- **Editor support** — [`udl_for_notepad++.xml`](udl_for_notepad++.xml) User-Defined Language for Notepad++ (`.hsl` / `.hml` / `.include`).
 
 See [`demo.hsl`](demo.hsl) for a full showcase of every construct.
+
+### Line continuations
+
+Long expressions can span multiple lines. Two forms:
+
+```python
+# 1) Trailing operator (most common) — the line ends with an operator
+f = 1.5 * (mtth:democracy_factor + mtth:fascism_factor) /
+    (2 * mtth:democracy_factor + mtth:communism_factor + mtth:fascism_factor) * 2
+
+# 2) Explicit backslash
+g = 10 + 20 + \
+    30 + 40
+```
+
+Joining runs before the indenter, so the continuation line's indentation is ignored and never produces a spurious statement break. A `#` comment on a continued line is stripped first; full-line comments and content inside `"..."` strings are never treated as continuations.
 
 ## Status
 
@@ -117,3 +138,7 @@ python watcher.py "C:\Games\...\mod\_sandbox" "C:\Games\...\Hearts of Iron IV"
 ```
 
 Leave the window open and edit `.hsl` in your editor — every save rebuilds the mod. On an error the watcher window pops to the front with a beep and shows what broke.
+
+## Editor support (Notepad++)
+
+Import [`udl_for_notepad++.xml`](udl_for_notepad++.xml) via **Language → User Defined Language → Define your language… → Import**. It covers keywords, builtins, scope prefixes (`var:` / `token:` / `mtth:`), array methods, and country tags for `.hsl`, `.hml`, and `.include` files.

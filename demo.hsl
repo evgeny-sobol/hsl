@@ -7,7 +7,7 @@
 # -----------------------------------------------------------------------------
 # Variables & assignment
 # -----------------------------------------------------------------------------
-# `=` writes a temp variable; a leading `&` marks a persistent variable.
+# Bare names are TEMP by default; a leading `&` marks a persistent variable.
 &current_year = 2026
 &current_year++
 &current_year--
@@ -38,9 +38,17 @@ c = 2 ** 3 ** 2
 d = 17 % 5
 
 # Builtins: sqrt(x), round(x), clamp(x, lo, hi), abs(x).
-hyp   = sqrt(a ** 2 + b ** 2)
+hyp = sqrt(a ** 2 + b ** 2)
 score = clamp(round(c / 10), 0, 50)
-dist  = abs(a - b)
+dist = abs(a - b)
+
+# Line continuations: a trailing operator (or an explicit `\`) joins the next
+# physical line into one logical expression. Indentation on the continuation
+# line is ignored — useful for long formulas.
+f = 1.5 * (mtth:democracy_factor + mtth:fascism_factor) /
+    (2 * mtth:democracy_factor + mtth:communism_factor + mtth:fascism_factor) * 2
+g = 10 + 20 + \
+    30 + 40
 
 # Random builtins. randi/randf write into a variable; the max bound is
 # inclusive. rand(v) uses the engine's default range. `var = randi(lo, hi)` is
@@ -67,14 +75,17 @@ if current_year == null:
   log("current_year was cleared")
 
 # Boolean operators: and / or / not, with parentheses.
+# Comparisons >= / <= / != emit the long check_variable form (the infix
+# engine form only supports =, >, <).
 if (current_year >= 1939 and current_year < 1945) or current_year == 1945:
   log("WWII is ongoing")
 if not is_historical_focus_on():
   log("Ahistorical mode")
-
+if enemies_count != 0:
+  log("Has enemies")
 
 # -----------------------------------------------------------------------------
-# match / case  (compiles to if / else_if / else)
+# match / case (compiles to if / else_if / else)
 # -----------------------------------------------------------------------------
 # Multiple patterns per arm via `|`; `case _` is the default.
 match rival_ideology:
@@ -123,7 +134,7 @@ enemies[].remove_at(0)
 enemies[].pop()
 
 # Random access: rand() picks a random element, rand_idx() a random index.
-pick     = enemies[].rand()
+pick = enemies[].rand()
 pick_idx = enemies[].rand_idx()
 
 # resize(n) pads with 0 (or truncates); resize(n, v) pads with a given value.
@@ -154,6 +165,10 @@ if is_major() and has_ideology_group(democracy):
 if THIS->has_war_with(FROM):
   log("At war with FROM")
 
+# A country tag can lead a scope transition the same way.
+if $GER->has_war_with(ROOT):
+  log("Germany is at war with us")
+
 # Multi-level chains nest each scope: A->B->C(x) => A = { B = { C = x } }.
 PREV->any_controlled_state->is_on_continent(south_america)
 
@@ -175,12 +190,12 @@ get_highest_scored_country(democratic_scorer, largest_democracy)
 get_sorted_scored_countries(democratic_scorer, &democracies[], &democracy_scores[])
 
 weight = mtth:base_weight
-saved  = var:cached_value
-
+saved = var:cached_value
 
 # -----------------------------------------------------------------------------
-# Macros  (compile-time expansion; defaults supported)
+# Macros (compile-time expansion; defaults and optional params supported)
 # -----------------------------------------------------------------------------
+# Define BEFORE any call — the transformer registers macros top-to-bottom.
 macro grant_boost(_amount_):
   add_stability(_amount_)
   add_war_support(_amount_)
@@ -189,7 +204,20 @@ $grant_boost(0.05)
 
 # `scope->$macro(args)` expands the macro body inside that scope transition.
 FROM->$grant_boost(0.02)
+$FRA->$grant_boost(0.01)
 
+# Optional params via `if defined(_p_):` — resolved at expansion time against
+# what the CALLER actually passed (defaults don't count). Kept and spliced
+# inline if every named param was supplied, dropped entirely otherwise.
+# `{param}` interpolates inside an identifier (word-boundary sub can't).
+macro tag_idea(_tag_, _days_=null):
+  add_timed_idea:
+    idea(idea_{_tag_}_boost)
+    if defined(_days_):
+      days(_days_)
+
+$tag_idea(ENG)          # no days line
+$tag_idea(ENG, 90)      # days = 90
 
 # -----------------------------------------------------------------------------
 # LINQ-style iteration with filtering

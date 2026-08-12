@@ -80,6 +80,10 @@ def _code_ends_with_continuation(code):
     for suf in _CONTINUATION_SUFFIXES:
         if not s.endswith(suf):
             continue
+        # '++' / '--' are complete inc/dec statements, not a trailing + or -.
+        # Without this guard, `&x++\n&y--` is wrongly glued into one line.
+        if suf in ('+', '-') and len(s) >= 2 and s[-2] == suf:
+            continue
         if suf.isalpha():
             # Word boundary: 'standard' must not match suffix 'and'.
             before = s[:-len(suf)]
@@ -94,8 +98,8 @@ def join_line_continuations(source_code):
     """Merge physical lines that continue an expression into one logical line.
 
     Two forms (both Python-flavoured):
-      1. Explicit backslash:  `expr \\` + newline
-      2. Trailing operator:   `expr /`  + newline   (the common HSL case)
+      1. Explicit backslash: `expr \\` + newline
+      2. Trailing operator:  `expr /`  + newline  (the common HSL case)
 
     Runs before empty-line markers and before HslIndenter, so the indenter
     never sees a fake indent on the continuation line and never emits _NL
@@ -253,8 +257,8 @@ def _load_macro_libraries(target_folder, parser):
     global_macros = {}  # This dictionary will store all processed macros
 
     # Recursively collect every .hml macro library. Two sources:
-    # 1. the compiler's own directory (the macro "standard library"), and
-    # 2. the target folder (project-local macros).
+    #   1. the compiler's own directory (the macro "standard library"), and
+    #   2. the target folder (project-local macros).
     # Deduped by real path so a target inside the compiler dir isn't scanned twice.
     # Sorted for a deterministic load order, so cross-file overrides are predictable.
     stdlib_dir = os.path.dirname(os.path.abspath(__file__))
