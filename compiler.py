@@ -260,11 +260,13 @@ def _load_macro_libraries(target_folder, parser):
     #   1. the compiler's own directory (the macro "standard library"), and
     #   2. the target folder (project-local macros).
     # Deduped by real path so a target inside the compiler dir isn't scanned twice.
-    # Sorted for a deterministic load order, so cross-file overrides are predictable.
+    # Stdlib loads first so project .hml files can call $stdlib macros; each
+    # source is sorted on its own for a deterministic order within that source.
     stdlib_dir = os.path.dirname(os.path.abspath(__file__))
     seen_hml = set()
     hml_paths = []
     for base in (stdlib_dir, target_folder):
+        batch = []
         for root, _dirs, files in os.walk(base):
             for f in files:
                 if not f.endswith('.hml'):
@@ -272,8 +274,9 @@ def _load_macro_libraries(target_folder, parser):
                 p = os.path.realpath(os.path.join(root, f))
                 if p not in seen_hml:
                     seen_hml.add(p)
-                    hml_paths.append(p)
-    hml_paths.sort()
+                    batch.append(p)
+        batch.sort()
+        hml_paths.extend(batch)
 
     # Newest macro-library timestamp: an implicit dependency of EVERY output,
     # since both .hsl files and .include payloads compile through the macro-aware

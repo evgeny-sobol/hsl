@@ -53,6 +53,10 @@ def expand_single_line_blocks_multi(text, names):
 
     Behaviourally identical to applying the single-name version sequentially
     (verified byte-for-byte over randomized inputs and edge cases).
+
+    Nested same-line blocks (`outer = { name = { ... } }`) are left alone:
+    expanding them would steal the parent's `{` into the indent and unbalance
+    braces. Includes never inject into those targets anyway.
     """
     names = [n for n in names if n]
     if not names:
@@ -68,6 +72,12 @@ def expand_single_line_blocks_multi(text, names):
         line_start = text.rfind('\n', 0, start) + 1
         # Skip a match that sits inside a comment or a string on its line.
         if _in_comment_or_string(text, line_start, start):
+            continue
+        # Nested on the same line (`POR = { country_event = { id = x } }`):
+        # expanding would treat `POR = { ` as indent and unbalance braces.
+        # Includes never inject into those; find_injection_point already
+        # rejects single-line targets. Leave them as-is.
+        if '{' in text[line_start:start]:
             continue
         open_pos = m.end()                      # index just after '{'
         try:
@@ -115,11 +125,13 @@ def expand_single_line_blocks(text, name):
                 while k < n and text[k] in ' \t\r\n':
                     k += 1
                 if k < n and text[k] == '{':
+                    line_start = text.rfind('\n', 0, i) + 1
+                    if '{' in text[line_start:i]:
+                        out.append(text[i:j]); i = j; continue
                     open_pos = k + 1
                     close_pos = _match_closing_brace(text, open_pos)
                     block_text = text[open_pos:close_pos]
                     if '\n' not in block_text:
-                        line_start = text.rfind('\n', 0, i) + 1
                         base_indent = text[line_start:i]
                         body = _reflow_single_line_body(block_text.strip(), base_indent)
                         if body is not None:

@@ -1,9 +1,15 @@
+# -----------------------------------------------------------------------------
+# AI
+# -----------------------------------------------------------------------------
 macro add_ai_strategy(_type_, _country_, _weight_):
   add_ai_strategy:
     type(_type_)
     id(_country_)
     value(_weight_)
 
+# -----------------------------------------------------------------------------
+# Dynamic modifiers
+# -----------------------------------------------------------------------------
 macro add_dynamic_modifier(_modifier_, _scope_=null, _days_=null):
   add_dynamic_modifier:
     modifier(_modifier_)
@@ -14,7 +20,15 @@ macro add_dynamic_modifier(_modifier_, _scope_=null, _days_=null):
 macro remove_dynamic_modifier(_modifier_):
   remove_dynamic_modifier:
     modifier(_modifier_)
+macro has_dynamic_modifier(_modifier_, _country_=null):
+  has_dynamic_modifier:
+    modifier(_modifier_)
+    if defined(_country_):
+      scope(_country_)
 
+# -----------------------------------------------------------------------------
+# Opinion / relations
+# -----------------------------------------------------------------------------
 macro add_opinion_modifier(_country_, _modifier_):
   add_opinion_modifier:
     target(_country_)
@@ -31,12 +45,38 @@ macro remove_relation_modifier(_country_, _modifier_):
   remove_relation_modifier:
     target(_country_)
     modifier(_modifier_)
+macro has_opinion(_country_, _amount_, _op_=">"):
+  has_opinion:
+    target(_country_)
+    raw value _op_ _amount_
+macro has_opinion_modifier(_country_, _modifier_):
+  has_opinion_modifier:
+    target(_country_)
+    modifier(_modifier_)
+macro has_relation_modifier(_country_, _modifier_):
+  has_relation_modifier:
+    target(_country_)
+    modifier(_modifier_)
 
+# -----------------------------------------------------------------------------
+# Politics / popularity
+# -----------------------------------------------------------------------------
 macro add_popularity(_ideology_or_tag_, _amount_):
   add_popularity:
     ideology(_ideology_or_tag_)
     popularity(_amount_) # Values used are 0.0 to 1.0
+macro set_political_party(_ideology_, _popularity_):
+  set_political_party:
+    ideology(_ideology_)
+    popularity(_popularity_) # Values used are 0 to 100
+macro compare_ideology_with_faction(_leader_, _amount_, _op_=">"):
+  compare_ideology_with_faction:
+    leader(_leader_)
+    raw value _op_ _amount_
 
+# -----------------------------------------------------------------------------
+# Arrays (Clausewitz form; HSL arrays[] are preferred)
+# -----------------------------------------------------------------------------
 macro add_to_array(_array_, _value_, _index_=null):
   add_to_array:
     array(_array_)
@@ -57,18 +97,19 @@ macro resize_array(_array_, _size_, _value_=null):
     if defined(_value_):
       value(_value_)
 
-macro can_build_railway(_state_A_, _state_B_):
-  can_build_railway:
-    start_state(_state_A_)
-    target_state(_state_B_)
-
+# -----------------------------------------------------------------------------
+# Comparisons / infix triggers
+# -----------------------------------------------------------------------------
+# Engine infix (`has_stability > 0.5`, `date > 1939.1.1`). HSL `a < b`
+# always emits check_variable, which is wrong for these triggers.
+# Default `_op_` is `>` ("at least"). Clausewitz infix on these triggers
+# only accepts `>` / `<` / `=`, not `>=`. Invert with `not $macro(n)` for "below".
 macro compare(_field_, _op_, _val_):
   raw _field_ _op_ _val_
-
-macro compare_ideology_with_faction(_leader_, _amount_):
-  compare_ideology_with_faction:
-    leader(_leader_)
-    raw value > _amount_
+macro has_stability(_val_, _op_=">"):
+  raw has_stability _op_ _val_
+macro date(_date_, _op_=">"):
+  raw date _op_ _date_
 
 macro focus_progress(_focus_, _progress_, _op_=">"):
   focus_progress:
@@ -80,11 +121,14 @@ macro has_built(_building_, _amount_, _op_=">"):
     type(_building_)
     raw value _op_ _amount_
 
-macro has_opinion(_country_, _amount_, _op_=">"):
-  has_opinion:
-    target(_country_)
-    raw value _op_ _amount_
+macro can_build_railway(_state_A_, _state_B_):
+  can_build_railway:
+    start_state(_state_A_)
+    target_state(_state_B_)
 
+# -----------------------------------------------------------------------------
+# Flags
+# -----------------------------------------------------------------------------
 macro has_country_flag(_flag_, _value_=null, _date_=null, _days_=null):
   has_country_flag:
     flag(_flag_)
@@ -103,17 +147,42 @@ macro has_global_flag(_flag_, _value_=null, _date_=null, _days_=null):
       raw date > _date_
     if defined(_days_):
       raw days > _days_
+macro has_state_flag(_flag_, _value_=null, _date_=null, _days_=null):
+  has_state_flag:
+    flag(_flag_)
+    if defined(_value_):
+      raw value > _value_
+    if defined(_date_):
+      raw date > _date_
+    if defined(_days_):
+      raw days > _days_
+macro has_character_flag(_flag_, _value_=null, _date_=null, _days_=null):
+  has_character_flag:
+    flag(_flag_)
+    if defined(_value_):
+      raw value > _value_
+    if defined(_date_):
+      raw date > _date_
+    if defined(_days_):
+      raw days > _days_
 
-macro has_dynamic_modifier(_modifier_, _country_=null):
-  has_dynamic_modifier:
-    modifier(_modifier_)
-    if defined(_country_):
-      scope(_country_)
-
-macro has_relation_modifier(_country_, _modifier_):
-  has_relation_modifier:
-    target(_country_)
-    modifier(_modifier_)
+# Days-only form: the 4-arg has_*_flag cannot skip value/date to pass days.
+macro has_country_flag_days(_flag_, _days_):
+  has_country_flag:
+    flag(_flag_)
+    raw days > _days_
+macro has_global_flag_days(_flag_, _days_):
+  has_global_flag:
+    flag(_flag_)
+    raw days > _days_
+macro has_state_flag_days(_flag_, _days_):
+  has_state_flag:
+    flag(_flag_)
+    raw days > _days_
+macro has_character_flag_days(_flag_, _days_):
+  has_character_flag:
+    flag(_flag_)
+    raw days > _days_
 
 macro set_character_flag(_flag_, _value_, _days_=null):
   set_character_flag:
@@ -172,11 +241,9 @@ macro clear_global_flag(_flag_):
 macro clear_state_flag(_flag_):
   clr_state_flag(_flag_)
 
-macro set_political_party(_ideology_, _popularity_):
-  set_political_party:
-    ideology(_ideology_)
-    popularity(_popularity_) # Values used are 0 to 100
-
+# -----------------------------------------------------------------------------
+# Variables (Clausewitz form with optional tooltip; HSL assignment is preferred)
+# -----------------------------------------------------------------------------
 macro set_variable(_var_, _value_, _tooltip_=null):
   set_variable:
     var(_var_)
@@ -213,3 +280,242 @@ macro modulo_variable(_var_, _value_, _tooltip_=null):
     value(_value_)
     if defined(_tooltip_):
       tooltip(_tooltip_)
+
+# -----------------------------------------------------------------------------
+# Value aliases
+# -----------------------------------------------------------------------------
+macro drift_defence():
+  modifier@drift_defence_factor
+macro war_support():
+  has_war_support
+
+# -----------------------------------------------------------------------------
+# Events
+# -----------------------------------------------------------------------------
+# Immediate: $country_event(siam.8). Delayed in days: $country_event(siam.8, 7).
+# hours / random_* stay as an HSL country_event: block.
+macro country_event(_id_, _days_=null):
+  country_event:
+    id(_id_)
+    if defined(_days_):
+      days(_days_)
+macro news_event(_id_, _days_=null):
+  news_event:
+    id(_id_)
+    if defined(_days_):
+      days(_days_)
+
+# -----------------------------------------------------------------------------
+# Missions / decisions
+# -----------------------------------------------------------------------------
+macro add_days_mission_timeout(_mission_, _days_):
+  add_days_mission_timeout:
+    mission(_mission_)
+    days(_days_)
+macro add_days_remove(_decision_, _days_):
+  add_days_remove:
+    decision(_decision_)
+    days(_days_)
+macro activate_targeted_decision(_target_, _decision_):
+  activate_targeted_decision:
+    target(_target_)
+    decision(_decision_)
+
+# -----------------------------------------------------------------------------
+# Balance of power
+# -----------------------------------------------------------------------------
+macro is_power_balance_in_range(_id_, _range_):
+  is_power_balance_in_range:
+    id(_id_)
+    range(_range_)
+macro is_power_balance_side_active(_id_, _side_):
+  is_power_balance_side_active:
+    id(_id_)
+    side(_side_)
+macro add_power_balance_modifier(_id_, _modifier_):
+  add_power_balance_modifier:
+    id(_id_)
+    modifier(_modifier_)
+macro remove_power_balance_modifier(_id_, _modifier_):
+  remove_power_balance_modifier:
+    id(_id_)
+    modifier(_modifier_)
+macro add_power_balance_value(_id_, _value_):
+  add_power_balance_value:
+    id(_id_)
+    value(_value_)
+
+# -----------------------------------------------------------------------------
+# Army / navy / equipment
+# -----------------------------------------------------------------------------
+macro has_army_manpower(_size_, _op_=">", _type_=null):
+  has_army_manpower:
+    raw size _op_ _size_
+    if defined(_type_):
+      type(_type_)
+macro has_army_size(_size_, _op_=">", _type_=null):
+  has_army_size:
+    raw size _op_ _size_
+    if defined(_type_):
+      type(_type_)
+macro has_navy_size(_size_, _op_=">", _type_=null):
+  has_navy_size:
+    raw size _op_ _size_
+    if defined(_type_):
+      type(_type_)
+# Vanilla form: has_equipment = { infantry_equipment > 4999 }
+macro has_equipment(_type_, _amount_, _op_=">"):
+  has_equipment:
+    raw _type_ _op_ _amount_
+
+# -----------------------------------------------------------------------------
+# Diplomacy
+# -----------------------------------------------------------------------------
+macro diplomatic_relation(_country_, _relation_, _active_=yes):
+  diplomatic_relation:
+    country(_country_)
+    relation(_relation_)
+    active(_active_)
+
+# -----------------------------------------------------------------------------
+# War / autonomy
+# -----------------------------------------------------------------------------
+macro declare_war_on(_target_, _type_):
+  declare_war_on:
+    target(_target_)
+    type(_type_)
+macro create_wargoal(_target_, _type_):
+  create_wargoal:
+    type(_type_)
+    target(_target_)
+macro add_to_war(_alliance_, _enemy_, _reason_=asked_to_join):
+  add_to_war:
+    targeted_alliance(_alliance_)
+    enemy(_enemy_)
+    hostility_reason(_reason_)
+macro white_peace(_tag_, _message_=null):
+  white_peace:
+    tag(_tag_)
+    if defined(_message_):
+      message(_message_)
+macro annex_country(_target_, _transfer_troops_=null):
+  annex_country:
+    target(_target_)
+    if defined(_transfer_troops_):
+      transfer_troops(_transfer_troops_)
+macro add_named_threat(_threat_, _name_):
+  add_named_threat:
+    threat(_threat_)
+    name(_name_)
+macro set_autonomy(_target_, _state_, _freedom_=null):
+  set_autonomy:
+    target(_target_)
+    autonomy_state(_state_)
+    if defined(_freedom_):
+      freedom_level(_freedom_)
+# Nested form with optional end_wars. Scalar puppet(TAG) stays native HSL.
+macro puppet(_target_, _end_wars_=null):
+  puppet:
+    target(_target_)
+    if defined(_end_wars_):
+      end_wars(_end_wars_)
+
+# -----------------------------------------------------------------------------
+# Ideas
+# -----------------------------------------------------------------------------
+macro add_timed_idea(_idea_, _days_):
+  add_timed_idea:
+    idea(_idea_)
+    days(_days_)
+macro modify_timed_idea(_idea_, _days_):
+  modify_timed_idea:
+    idea(_idea_)
+    days(_days_)
+macro swap_ideas(_remove_, _add_, _days_=null):
+  swap_ideas:
+    remove_idea(_remove_)
+    add_idea(_add_)
+    if defined(_days_):
+      days(_days_)
+macro swap_ruler_traits(_remove_, _add_):
+  swap_ruler_traits:
+    remove(_remove_)
+    add(_add_)
+
+# -----------------------------------------------------------------------------
+# Equipment / map / resources
+# -----------------------------------------------------------------------------
+macro add_equipment_to_stockpile(_type_, _amount_, _producer_=null):
+  add_equipment_to_stockpile:
+    type(_type_)
+    amount(_amount_)
+    if defined(_producer_):
+      producer(_producer_)
+macro send_equipment(_type_, _amount_, _target_):
+  send_equipment:
+    equipment(_type_)
+    amount(_amount_)
+    target(_target_)
+macro send_equipment_fraction(_target_, _value_):
+  send_equipment_fraction:
+    target(_target_)
+    value(_value_)
+macro add_resource(_type_, _amount_, _state_=null):
+  add_resource:
+    type(_type_)
+    amount(_amount_)
+    if defined(_state_):
+      state(_state_)
+macro add_offsite_building(_type_, _level_):
+  add_offsite_building:
+    type(_type_)
+    level(_level_)
+macro add_victory_points(_province_, _value_):
+  add_victory_points:
+    province(_province_)
+    value(_value_)
+macro set_victory_points(_province_, _value_):
+  set_victory_points:
+    province(_province_)
+    value(_value_)
+macro set_capital(_state_, _remember_=null):
+  set_capital:
+    state(_state_)
+    if defined(_remember_):
+      remember_old_capital(_remember_)
+macro give_resource_rights(_receiver_, _state_):
+  give_resource_rights:
+    receiver(_receiver_)
+    state(_state_)
+macro has_resources_amount(_resource_, _amount_, _op_=">"):
+  has_resources_amount:
+    resource(_resource_)
+    raw amount _op_ _amount_
+macro distance_to(_state_, _op_, _val_):
+  distance_to:
+    target(_state_)
+    raw value _op_ _val_
+macro has_game_rule(_rule_, _option_):
+  has_game_rule:
+    rule(_rule_)
+    option(_option_)
+
+# -----------------------------------------------------------------------------
+# Intel / collaboration
+# -----------------------------------------------------------------------------
+macro add_operation_token(_tag_, _token_):
+  add_operation_token:
+    tag(_tag_)
+    token(_token_)
+macro add_decryption(_target_, _amount_):
+  add_decryption:
+    target(_target_)
+    amount(_amount_)
+macro add_collaboration(_target_, _value_):
+  add_collaboration:
+    target(_target_)
+    value(_value_)
+macro has_collaboration(_target_, _value_, _op_=">"):
+  has_collaboration:
+    target(_target_)
+    raw value _op_ _value_
