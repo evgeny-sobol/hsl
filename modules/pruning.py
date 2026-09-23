@@ -5,12 +5,25 @@ import os
 import fnmatch
 
 
+def _is_nested_checkout(dirpath, top):
+    """True if dirpath is a nested git checkout inside top (e.g. a submodule).
+
+    Mirrors the compiler helper: the top folder itself is never nested, and
+    submodule checkouts carry a .git file or dir.
+    """
+    if os.path.realpath(dirpath) == os.path.realpath(top):
+        return False
+    return os.path.exists(os.path.join(dirpath, ".git"))
+
+
 def _collect_unignore_patterns(target_folder):
     """Gather negation patterns (lines starting with '!') from every .gitignore
     under target_folder. Returns a list of (dir, pattern) so a pattern is matched
     relative to the .gitignore that declares it, mirroring git's scoping."""
     patterns = []
-    for root, _dirs, files in os.walk(target_folder):
+    for root, dirs, files in os.walk(target_folder):
+        dirs[:] = [d for d in dirs
+                   if not _is_nested_checkout(os.path.join(root, d), target_folder)]
         if '.gitignore' not in files:
             continue
         try:
@@ -43,7 +56,10 @@ def prune_orphan_txt(target_folder):
     .txt is protected by a '!' rule in a .gitignore. Returns the count removed."""
     patterns = _collect_unignore_patterns(target_folder)
     removed = 0
-    for root, _dirs, files in os.walk(target_folder):
+    for root, dirs, files in os.walk(target_folder):
+        # Never touch generated files inside nested checkouts (submodules).
+        dirs[:] = [d for d in dirs
+                   if not _is_nested_checkout(os.path.join(root, d), target_folder)]
         stems = {f.rsplit('.', 1)[0] for f in files
                  if f.endswith('.hsl') or f.endswith('.include')}
         for f in files:
