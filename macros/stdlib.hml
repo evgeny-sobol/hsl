@@ -280,6 +280,11 @@ macro modulo_variable(_var_, _value_, _tooltip_=null):
     value(_value_)
     if defined(_tooltip_):
       tooltip(_tooltip_)
+macro clamp_variable(_var_, _min_, _max_):
+  clamp_variable:
+    var(_var_)
+    min(_min_)
+    max(_max_)
 
 # -----------------------------------------------------------------------------
 # Value aliases

@@ -33,7 +33,7 @@ modifier = {
 - **Control flow** — `if` / `elif` / `else`, `while`, `break`, and `match` / `case` (with `|` patterns and a `_` default).
 - **Loops** — numeric `for x in range(...)`, scope iteration `for c in every_country()`, and indexed array iteration `for value, index in arr[]`.
 - **Arrays** — add / erase / remove_at / pop / clear / resize, indexing, size, min/max, `rand` / `rand_idx`, and `in` / `not in` membership tests.
-- **Variables** — temp by default; a leading `&` marks persistent. Compound assignment, `++`/`--`, tuple assign (`a, b = 1, 2`), `null` clearing.
+- **Variables** — temp by default; a leading `&` marks persistent. Compound assignment, `++`/`--`, tuple assign (`a, b = 1, 2`), `null` clearing. `+=` / `-=` / `*=` / `/=` on a persistent variable compile to `add_to_variable` and friends, and `$clamp_variable(var, min, max)` clamps in place — together they are the portable replacement for a `set_variable = clamp(...)` math block, which the engine rejects inside `common/on_actions/`.
 - **Scoped calls** — `scope->trigger(arg)`, multi-level chains `A->B->C(x)`, block form `scope->name:`, country-tag heads (`$GER->...`), and `scope->$macro(args)`.
 - **Trigger sugar** — `trigger(a | b | c)` → OR, `trigger(a & b & c)` → AND.
 - **Macros** — compile-time expansion with default arguments, optional params via `if defined(_p_):`, `{param}` brace-interpolation inside identifiers, and a reusable standard library.
