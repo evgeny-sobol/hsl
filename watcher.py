@@ -1,5 +1,6 @@
 import argparse
 import ctypes
+import os
 import subprocess
 import time
 from datetime import datetime
@@ -45,8 +46,28 @@ def alert(code):
     raise_console()
 
 
+def _is_nested_checkout(dirpath, top):
+    """True if dirpath is a nested git checkout inside top (e.g. a submodule)."""
+    if os.path.realpath(dirpath) == os.path.realpath(top):
+        return False
+    return os.path.exists(os.path.join(dirpath, ".git"))
+
+
 def snapshot(watch_dir):
-    return {p: p.stat().st_mtime for p in watch_dir.rglob("*") if p.suffix in EXTS}
+    out = {}
+    for root, dirs, files in os.walk(watch_dir):
+        # Nested checkouts sync outward via tools/sync_core.py; watching their
+        # sources would rebuild stale copies, so skip them.
+        dirs[:] = [d for d in dirs
+                   if not _is_nested_checkout(os.path.join(root, d), str(watch_dir))]
+        for f in files:
+            if os.path.splitext(f)[1] in EXTS:
+                p = Path(root) / f
+                try:
+                    out[p] = p.stat().st_mtime
+                except OSError:
+                    continue
+    return out
 
 
 def main():

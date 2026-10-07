@@ -245,6 +245,18 @@ def process_include_file(include_path, target_folder, vanilla_root, parser, tran
     return 'built'
 
 
+def _is_nested_checkout(dirpath, top):
+    """True if dirpath is a nested git checkout inside top (e.g. a submodule).
+
+    The top folder itself is never treated as nested, even though it usually
+    contains a .git entry. Submodule checkouts carry a .git file (or dir),
+    so a single existence check covers both layouts.
+    """
+    if os.path.realpath(dirpath) == os.path.realpath(top):
+        return False
+    return os.path.exists(os.path.join(dirpath, ".git"))
+
+
 def _load_macro_libraries(target_folder, parser):
     """Collect and compile every .hml macro library from the compiler's own dir
     (the standard library) and the target folder, into a shared macro dict.
@@ -267,7 +279,11 @@ def _load_macro_libraries(target_folder, parser):
     hml_paths = []
     for base in (stdlib_dir, target_folder):
         batch = []
-        for root, _dirs, files in os.walk(base):
+        for root, dirs, files in os.walk(base):
+            # Never descend into nested git checkouts (e.g. a core/ submodule):
+            # their .hml libraries belong to that repo, not to this build.
+            dirs[:] = [d for d in dirs
+                       if not _is_nested_checkout(os.path.join(root, d), base)]
             for f in files:
                 if not f.endswith('.hml'):
                     continue
@@ -420,6 +436,10 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
     # Use os.walk to recursively traverse all subdirectories
     # root - current directory, dirs - list of subdirectories, files - files within it
     for root, dirs, files in os.walk(target_folder):
+        # Nested git checkouts (e.g. a core/ submodule) build in their own repo;
+        # their sources must not compile into this mod's .txt outputs.
+        dirs[:] = [d for d in dirs
+                   if not _is_nested_checkout(os.path.join(root, d), target_folder)]
         hsl_files = [f for f in files if f.endswith('.hsl')]
         include_files = [f for f in files if f.endswith('.include')]
 
