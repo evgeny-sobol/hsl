@@ -2,7 +2,9 @@
 import re
 from modules.paradox_text import _indent_width
 
-_HEADER_RE = re.compile(r'^(\+?)([A-Za-z_][A-Za-z0-9_]*)(?:\[([^\]]+)\])?:\s*$')
+_HEADER_RE = re.compile(r'^(\+?)([A-Za-z_][A-Za-z0-9_-]*)(?:\[([^\]]+)\])?:\s*$')
+# NOTE: names carry '-' because Paradox ids contain hyphens
+# (AUS_arthur_seyss-inquart, AST_vickers-ruwolt_organization_idea).
 _ATTR_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*={1,2}\s*(.+)$')
 
 
