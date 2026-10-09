@@ -40,7 +40,7 @@ modifier = {
 - **LINQ-style filtering** — `every_country().which()`.
 - **Scorers** — `get_highest_scored_country`, `get_sorted_scored_countries`.
 - **`raw` escape hatch** — pass verbatim Clausewitz through untouched for anything HSL doesn't model natively.
-- **`.include` delta system** — inject changes into vanilla HoI4 files without copying them.
+- **`.include` delta system** - inject changes into (and remove existing blocks from, via `-name:`) vanilla HoI4 files without copying them.
 - **Editor support** — [`udl_for_notepad++.xml`](udl_for_notepad++.xml) User-Defined Language for Notepad++ (`.hsl` / `.hml` / `.include`).
 
 See [`demo.hsl`](demo.hsl) for a full showcase of every construct.

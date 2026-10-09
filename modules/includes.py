@@ -5,7 +5,9 @@ splicing; this module wires them together.
 Public entry point: transpile_include_source (used by the compiler).
 """
 from modules.include_parser import parse_include
-from modules.navigation import find_injection_point, _VanillaIndex
+from modules.navigation import (
+    find_injection_point, _VanillaIndex, resolve_block_span, resolve_child_span,
+)
 from modules.paradox_text import dedent_lines
 from modules.splicing import (
     expand_single_line_blocks_multi, _normalize_flat_aborts,
@@ -66,6 +68,8 @@ def _collect(node, nav_path, vanilla_text, compile_fragment, injections, index):
     for it in node.items:
         if isinstance(it, tuple) or it.create:
             local.append(it)
+        elif it.remove:
+            continue
         else:
             nav_children.append(it)
 
@@ -86,11 +90,58 @@ def _collect(node, nav_path, vanilla_text, compile_fragment, injections, index):
 
 def _collect_nav_names(node, acc):
     for it in node.items:
+        if isinstance(it, tuple) or it.create or it.remove:
+            continue
+        acc.add(it.name)
+        _collect_nav_names(it, acc)
+
+
+def _collect_remove_names(node, acc):
+    """Names of blocks targeted by `-name:` removal nodes, so single-line
+    `name = { ... }` occurrences get expanded into multi-line blocks and can be
+    located by the brace scanner."""
+    for it in node.items:
         if isinstance(it, tuple):
             continue
-        if not it.create:
+        if it.remove:
             acc.add(it.name)
-            _collect_nav_names(it, acc)
+        _collect_remove_names(it, acc)
+
+
+def _collect_removals(node, nav_path, acc):
+    """Gather (parent_nav_path, name, selector) for every `-name:` node."""
+    for it in node.items:
+        if isinstance(it, tuple):
+            continue
+        if it.remove:
+            acc.append((list(nav_path), it.name, it.selector))
+        elif not it.create:
+            _collect_removals(it, nav_path + [(it.name, it.selector)], acc)
+
+
+def _removal_spans(vanilla_text, index, removals):
+    """Turn removal requests into (start, end) text spans to delete. A span runs
+    from the start of the child's header line through the end of its closing
+    brace line, so the deleted block leaves no dangling blank line."""
+    spans = []
+    for nav_path, name, selector in removals:
+        parent_open, parent_close = resolve_block_span(index, nav_path)
+        child_open, child_close = resolve_child_span(
+            index, name, selector, parent_open, parent_close)
+        start = vanilla_text.rfind('\n', 0, child_open) + 1
+        end = child_close + 1
+        while end < len(vanilla_text) and vanilla_text[end] in ' \t\r':
+            end += 1
+        if end < len(vanilla_text) and vanilla_text[end] == '\n':
+            end += 1
+        spans.append((start, end))
+    return spans
+
+
+def _apply_removals(text, spans):
+    for start, end in sorted(spans, key=lambda t: t[0], reverse=True):
+        text = text[:start] + text[end:]
+    return text
 
 
 def transpile_include_source(vanilla_text, include_source, compile_fragment):
@@ -113,7 +164,10 @@ def transpile_include_source(vanilla_text, include_source, compile_fragment):
 
     nav_names = set()
     _collect_nav_names(root, nav_names)
-    vanilla_text = expand_single_line_blocks_multi(vanilla_text, nav_names)
+    remove_names = set()
+    _collect_remove_names(root, remove_names)
+    vanilla_text = expand_single_line_blocks_multi(
+        vanilla_text, nav_names | remove_names)
 
     # If the include navigates into an abort block, flat aborts must be wrapped
     # in OR so the abort:/OR: path resolves.
@@ -121,6 +175,16 @@ def transpile_include_source(vanilla_text, include_source, compile_fragment):
         vanilla_text = _normalize_flat_aborts(vanilla_text)
 
     index = _VanillaIndex(vanilla_text)
+
+    # `-name:` removals run before injections: they change the text, so the
+    # injection pass re-indexes afterwards.
+    removals = []
+    _collect_removals(root, [], removals)
+    if removals:
+        vanilla_text = _apply_removals(
+            vanilla_text, _removal_spans(vanilla_text, index, removals))
+        index = _VanillaIndex(vanilla_text)
+
     injections = []
     _collect(root, [], vanilla_text, compile_fragment, injections, index)
     return splice_injections(vanilla_text, injections)

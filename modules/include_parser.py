@@ -2,7 +2,7 @@
 import re
 from modules.paradox_text import _indent_width
 
-_HEADER_RE = re.compile(r'^(\+?)([A-Za-z_][A-Za-z0-9_-]*)(?:\[([^\]]+)\])?:\s*$')
+_HEADER_RE = re.compile(r'^([+-]?)([A-Za-z_][A-Za-z0-9_-]*)(?:\[([^\]]+)\])?:\s*$')
 # NOTE: names carry '-' because Paradox ids contain hyphens
 # (AUS_arthur_seyss-inquart, AST_vickers-ruwolt_organization_idea).
 _ATTR_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*={1,2}\s*(.+)$')
@@ -24,13 +24,18 @@ def _parse_selector(raw):
 class Node:
     """A header in the .include tree. `items` is an ordered list whose members
     are either child Nodes or ('leaf', raw_line) tuples, preserving source order
-    so leaves and sub-blocks interleave correctly."""
-    __slots__ = ('name', 'selector', 'create', 'col', 'items')
+    so leaves and sub-blocks interleave correctly.
 
-    def __init__(self, name=None, selector=None, create=False, col=-1):
+    `create` (`+name:`) adds a new child block; `remove` (`-name:`) deletes an
+    existing child block of the parent; both false means navigate into an
+    existing block and inject the node's payload there."""
+    __slots__ = ('name', 'selector', 'create', 'remove', 'col', 'items')
+
+    def __init__(self, name=None, selector=None, create=False, remove=False, col=-1):
         self.name = name
         self.selector = selector
         self.create = create
+        self.remove = remove
         self.col = col
         self.items = []
 
@@ -57,10 +62,12 @@ def parse_include(source):
 
         m = _HEADER_RE.match(stripped)
         if m:
-            create = bool(m.group(1))
+            op = m.group(1)
+            create = op == '+'
+            remove = op == '-'
             name = m.group(2)
             selector = _parse_selector(m.group(3))
-            node = Node(name, selector, create, col)
+            node = Node(name, selector, create, remove, col)
             stack[-1].items.append(node)
             stack.append(node)
         else:
