@@ -184,3 +184,29 @@ def find_injection_point(text, path, index=None):
     return line_start, content_indent
 
 
+def resolve_block_span(index, path):
+    """Resolve a navigate path to (open_pos, close_pos) of the target block,
+    both as absolute offsets into `index.text`. An empty path resolves to the
+    whole file. Raises KeyError when a segment does not resolve."""
+    start, end = 0, len(index.text)
+    if not path:
+        return start, end
+    for (name, selector) in path:
+        res = _resolve_segment(index, name, selector, start, end)
+        if res is None:
+            raise KeyError(
+                f"Block path segment '{_selector_repr(name, selector)}' not found")
+        start, end = res
+    return start, end
+
+
+def resolve_child_span(index, name, selector, start, end):
+    """(open_pos, close_pos) of the first direct-child block `name[selector]`
+    inside text[start:end]. Raises KeyError when it does not resolve."""
+    res = _resolve_segment(index, name, selector, start, end)
+    if res is None:
+        raise KeyError(
+            f"Block to remove '{_selector_repr(name, selector)}' not found")
+    return res
+
+
