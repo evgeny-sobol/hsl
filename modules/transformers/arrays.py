@@ -1,10 +1,8 @@
 class ArraysMixin:
     # Array lifetime: temp by DEFAULT; a leading '&' on the array NAME (after any
     # scope prefix, e.g. `&rivals`, `cty.&rivals`) marks it persistent. The '&'
-    # is a compiler marker, stripped before the name is emitted. The scope prefix
-    # is skipped by testing only the segment after the last '.'.
-    def _is_temp_array(self, arr):
-        return self._var_is_temp(arr)
+    # is a compiler marker, stripped before the name is emitted (_var_is_temp /
+    # _strip_persist test only the segment after the last '.').
 
     # Writing a value by index: arr[i] = val
     def array_assign(self, items):
@@ -16,7 +14,7 @@ class ArraysMixin:
         if isinstance(val, tuple) and val[0] == "COUNTRY_TAG":
             val = val[1]
 
-        is_temp = self._is_temp_array(arr)
+        is_temp = self._var_is_temp(arr)
         target = f"{self._strip_persist(arr)}^{i}"
         cmd = "set_temp_variable" if is_temp else "set_variable"
         return ("ASSIGN", cmd, "=", ("BLOCK", [("ASSIGN", target, "=", val)]))
@@ -77,11 +75,11 @@ class ArraysMixin:
         if isinstance(val, tuple) and val[0] == "COUNTRY_TAG":
             val = val[1]
 
-        # A leading '_' marks a temp array. In HoI4 "temp" is decided by the
-        # command, not the name, so every operation on a '_' array must use the
-        # temp variant — otherwise add/remove hit a persistent array while clear
-        # hits a temp one, silently targeting two different arrays.
-        is_temp = self._is_temp_array(arr)
+        # In HoI4 "temp" is decided by the command, not the name, so every
+        # operation on a temp array must use the temp variant - otherwise
+        # add/remove hit a persistent array while clear hits a temp one,
+        # silently targeting two different arrays.
+        is_temp = self._var_is_temp(arr)
         name = self._strip_persist(arr)
         rem_cmd = "remove_from_temp_array" if is_temp else "remove_from_array"
 
@@ -118,10 +116,10 @@ class ArraysMixin:
             raise ValueError(f"Compilation Error: Unknown array method '.{method}()'")
 
     # Clearing an array: arr[] <- null
-    # Temp arrays (leading '_') map to clear_temp_array, which HoI4 does provide.
+    # Temp arrays (no '&') map to clear_temp_array, which HoI4 does provide.
     def clear_arr(self, items):
         arr = self._check_var_name(str(items[0]))
-        cmd = "clear_temp_array" if self._is_temp_array(arr) else "clear_array"
+        cmd = "clear_temp_array" if self._var_is_temp(arr) else "clear_array"
         return ("ASSIGN", cmd, "=", self._strip_persist(arr))
 
     # Two-argument array search: arr[].min(value, index) / arr[].max(value, index)
@@ -146,7 +144,7 @@ class ArraysMixin:
         elif method == "resize":
             # Two-arg form resize(size, value): explicit default value for new
             # elements. (One-arg resize(size) is handled in array_method.)
-            is_temp = self._is_temp_array(arr)
+            is_temp = self._var_is_temp(arr)
             rcmd = "resize_temp_array" if is_temp else "resize_array"
             body = (f"array={self._strip_persist(arr)} "
                     f"size={self._strip_persist(str(value))} "

@@ -43,10 +43,10 @@ class HslTransformer(
     # ---- arithmetic -> accumulator value-blocks -----------------------------
     # An arithmetic expression is parsed into a tree:
     #   ("MATH", op, left, right)   binary op, op in + - * / % **
-    #   ("MATHFN", name, [args])    builtin: sqrt / round / clamp
+    #   ("MATHFN", name, [args])    builtin: sqrt / abs / round / clamp
     # HoI4 has no inline math, but it *does* have accumulator "value = { ... }"
     # blocks (see script_math_functions docs): a block starts from `value = X`
-    # and applies a sequence of ops (add/subtract/multiply/divide/modulo/pow/
+    # and applies a sequence of ops (add/subtract/multiply/divide/mod/pow/
     # root/round/clamp) left to right. We compile a whole tree into ONE such
     # nested block, so `(1 + 2) * 3` becomes
     #   value = { value = { value = 1  add = 2 }  multiply = 3 }
@@ -213,6 +213,16 @@ class HslTransformer(
             return [seed, ("ASSIGN", "root", "=", 2)]
         if name == "round":
             return [seed, ("ASSIGN", "round", "=", "yes")]
+        if name == "abs":
+            # |x| = x * sign, sign = (x > 0) * 2 - 1 (gives 0 for x = 0). Exact,
+            # unlike sqrt(x ** 2): root is approximate and the square of a big
+            # value can overflow the engine's fixed-point range.
+            x = self._acc_operand(args[0])
+            sign = ("BLOCK", [("ASSIGN", "value", "=", x),
+                              ("ASSIGN", "greater_than", "=", 0),
+                              ("ASSIGN", "multiply", "=", 2),
+                              ("ASSIGN", "subtract", "=", 1)])
+            return [seed, ("ASSIGN", "multiply", "=", sign)]
         if name == "clamp":
             lo = self._acc_operand(args[1])
             hi = self._acc_operand(args[2])

@@ -2,11 +2,15 @@ import argparse
 import ctypes
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
+from modules.pruning import _is_nested_checkout
+
 EXTS = {".hsl", ".hml", ".include"}
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 u32 = ctypes.windll.user32
 k32 = ctypes.windll.kernel32
@@ -46,13 +50,6 @@ def alert(code):
     raise_console()
 
 
-def _is_nested_checkout(dirpath, top):
-    """True if dirpath is a nested git checkout inside top (e.g. a submodule)."""
-    if os.path.realpath(dirpath) == os.path.realpath(top):
-        return False
-    return os.path.exists(os.path.join(dirpath, ".git"))
-
-
 def snapshot(watch_dir):
     out = {}
     for root, dirs, files in os.walk(watch_dir):
@@ -78,27 +75,34 @@ def main():
     ap.add_argument("-f", "--force", action="store_true")
     args = ap.parse_args()
 
-    watch_dir = Path(args.target_dir)
+    # The macro standard library is an input of every build too.
+    watch_dirs = [Path(args.target_dir), Path(HERE) / "macros"]
 
-    cmd = ["python", "compiler.py", args.target_dir]
+    cmd = [sys.executable, os.path.join(HERE, "compiler.py"), args.target_dir]
     if args.vanilla_root:
         cmd.append(args.vanilla_root)
     if args.force:
         cmd.append("--force")
 
-    print(f"Watching {watch_dir.resolve()}")
+    def snapshot_all():
+        out = {}
+        for d in watch_dirs:
+            out.update(snapshot(d))
+        return out
 
-    prev = snapshot(watch_dir)
+    print(f"Watching {watch_dirs[0].resolve()}")
+
+    prev = snapshot_all()
     try:
         while True:
             time.sleep(args.interval)
-            cur = snapshot(watch_dir)
+            cur = snapshot_all()
             if cur != prev:
                 print(f"\n{datetime.now():%H:%M:%S %d.%m.%Y}")
                 alert(subprocess.run(cmd).returncode)
                 # re-snapshot after the build so generated .txt files don't
                 # retrigger on the next tick
-                prev = snapshot(watch_dir)
+                prev = snapshot_all()
     except KeyboardInterrupt:
         print("\nStopped")
 

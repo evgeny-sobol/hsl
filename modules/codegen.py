@@ -12,10 +12,10 @@ def resolve_scopes(text, scope_stack):
 
     # Strip the persistent-variable marker '&' (compiler-only) from every
     # emitted name. It may sit at the start (`&foo`) or after a scope prefix
-    # (`global.&foo`); a regex removes it wherever it directly precedes an
-    # identifier. Runs regardless of scope_stack so reads are cleaned too.
+    # (`global.&foo`), never inside a word. Runs regardless of scope_stack so
+    # reads are cleaned too.
     if "&" in text:
-        text = re.sub(r'&(?=[A-Za-z_])', '', text)
+        text = re.sub(r'(?<![A-Za-z0-9_])&(?=[A-Za-z_])', '', text)
 
     if not scope_stack:
         return text
@@ -49,6 +49,12 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
 
     if isinstance(ast, tuple):
         node_type = ast[0]
+
+        if node_type == "BREAK":
+            raise ValueError(
+                "'break' is only supported inside 'while', 'for x in range(...)' "
+                "and 'for value, index in arr[]' loops; engine scope loops "
+                "such as every_country() cannot be broken out of.")
 
         if node_type == "COMMENT":
             comment_text = ast[1]
@@ -120,6 +126,3 @@ def generate_hoi4_code(ast, indent_level=0, scope_stack=None):
         return f"{spacing}{ast}\n"
 
     return ""
-
-# A macro call is `$name(` where name starts lowercase (COUNTRY_TAG is `$` +
-# uppercase, so `$GER(` never matches). Used to decide whether a changed .hml

@@ -7,6 +7,7 @@ Public entry point: transpile_include_source (used by the compiler).
 from modules.include_parser import parse_include
 from modules.navigation import (
     find_injection_point, _VanillaIndex, resolve_block_span, resolve_child_span,
+    _selector_repr,
 )
 from modules.paradox_text import dedent_lines
 from modules.splicing import (
@@ -134,8 +135,16 @@ def _removal_spans(vanilla_text, index, removals):
             end += 1
         if end < len(vanilla_text) and vanilla_text[end] == '\n':
             end += 1
-        spans.append((start, end))
-    return spans
+        spans.append((start, end, _selector_repr(name, selector)))
+    # Deleting the same or nested text twice would cut into unrelated blocks.
+    spans.sort()
+    for (_, a_end, a_name), (b_start, _, b_name) in zip(spans, spans[1:]):
+        if b_start < a_end:
+            raise ValueError(
+                f"Removals '-{a_name}:' and '-{b_name}:' target the same or "
+                f"overlapping block. Use index selectors (-name[0]:, -name[1]:) "
+                f"to remove several blocks with one name.")
+    return [(s, e) for s, e, _ in spans]
 
 
 def _apply_removals(text, spans):

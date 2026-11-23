@@ -48,6 +48,16 @@ def test_removal_drops_the_block_and_keeps_siblings():
     assert "has_government = communism" in out, "parent tail was lost"
 
 
+def test_duplicate_removal_is_an_error():
+    include = INCLUDE + "        -GXC_bai_chongxi:\n"
+    try:
+        transpile_include_source(VANILLA, include, None)
+    except ValueError:
+        return
+    raise AssertionError("duplicate removal silently cut unrelated text")
+
+
 if __name__ == "__main__":
     test_removal_drops_the_block_and_keeps_siblings()
+    test_duplicate_removal_is_an_error()
     print("ok: include removal")

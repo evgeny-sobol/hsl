@@ -7,7 +7,9 @@ from modules.transformer import HslTransformer
 from modules import includes
 from modules.codegen import generate_hoi4_code
 from modules.freshness import _macro_floor, _mtime, _is_fresh
-from modules.pruning import prune_orphan_txt
+from modules.pruning import prune_orphan_txt, _is_nested_checkout, GENERATED_MARKER
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 class HslIndenter(Indenter):
@@ -241,20 +243,8 @@ def process_include_file(include_path, target_folder, vanilla_root, parser, tran
     )
 
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write(result)
+        f.write(GENERATED_MARKER + "\n" + result)
     return 'built'
-
-
-def _is_nested_checkout(dirpath, top):
-    """True if dirpath is a nested git checkout inside top (e.g. a submodule).
-
-    The top folder itself is never treated as nested, even though it usually
-    contains a .git entry. Submodule checkouts carry a .git file (or dir),
-    so a single existence check covers both layouts.
-    """
-    if os.path.realpath(dirpath) == os.path.realpath(top):
-        return False
-    return os.path.exists(os.path.join(dirpath, ".git"))
 
 
 def _load_macro_libraries(target_folder, parser):
@@ -274,10 +264,9 @@ def _load_macro_libraries(target_folder, parser):
     # Deduped by real path so a target inside the compiler dir isn't scanned twice.
     # Stdlib loads first so project .hml files can call $stdlib macros; each
     # source is sorted on its own for a deterministic order within that source.
-    stdlib_dir = os.path.dirname(os.path.abspath(__file__))
     seen_hml = set()
     hml_paths = []
-    for base in (stdlib_dir, target_folder):
+    for base in (HERE, target_folder):
         batch = []
         for root, dirs, files in os.walk(base):
             # Never descend into nested git checkouts (e.g. a core/ submodule):
@@ -372,19 +361,12 @@ def _compile_hsl_file(hsl_path, root, target_folder, parser, transformer,
     print(f"Compiling: {relative_path}...")
     try:
         with open(hsl_path, "r", encoding="utf-8-sig") as f:
-            source_code = f.read() + "\n"
+            source_code = f.read()
 
-        source_code = preserve_empty_lines(source_code)
-        tree = parser.parse(source_code)
-        ast_data = transformer.transform(tree)
-        final_code = generate_hoi4_code(ast_data)
-
-        # Turn indent-marker lines back into real empty lines.
-        final_code = re.sub(r'^[ \t]*#___EMPTY_LINE___$', '',
-                            final_code, flags=re.MULTILINE)
+        final_code = compile_fragment(source_code.split("\n"), parser, transformer)
 
         with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(final_code)
+            f.write(GENERATED_MARKER + "\n" + final_code + "\n")
         return 'built'
     except Exception as e:
         print(f"Error in file {filename}: {e}")
@@ -405,9 +387,9 @@ def compile_folder(target_folder, vanilla_root=None, force=False):
     # quoted vanilla root passed programmatically or via a shell quirk still works.
     if vanilla_root:
         vanilla_root = vanilla_root.strip().strip('"')
-    grammar_path = "modules/grammar.lark"
+    grammar_path = os.path.join(HERE, "modules", "grammar.lark")
     if not os.path.exists(grammar_path):
-        print(f"Error: Grammar file '{grammar_path}' not found in the project root!")
+        print(f"Error: Grammar file '{grammar_path}' not found!")
         return False
     # Initialize Lark
     print(f"Loading grammar from {grammar_path}...")

@@ -13,7 +13,7 @@ class MiscMixin:
     def pass_statement(self, items):
         return None
 
-    # `break` inside a for-loop. Emitted as a marker; the enclosing loop handler
+    # `break` inside a while/for loop. Emitted as a marker; the enclosing loop handler
     # allocates a unique flag var, declares `break = hsl_break_N` in the loop
     # header, and rewrites this marker to `set_temp_variable = { hsl_break_N = 1 }`.
     def break_statement(self, items):

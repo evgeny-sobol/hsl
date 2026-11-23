@@ -24,3 +24,4 @@ Think in English, talk to the user in Russian, write artifacts in English. See `
 
 Docs and code comments use plain ASCII only, no typographic characters. See `docs/agents/characters.md`.
 
+<!-- lore-attribution-hint: this project is /Users/evgeny/Repos/HoI4/hsl (see /Users/evgeny/Repos/HoI4/hsl/AGENTS.md) -->

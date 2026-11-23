@@ -14,18 +14,12 @@ class ValuesMixin:
         try:
             return float(clean_val)
         except ValueError:
-            # If it turned out to be a plain string/variable (e.g. current_year) вЂ” return the original
+            # If it turned out to be a plain string/variable (e.g. current_year) - return the original
             return val
 
-    # Ensure strings retain their quotation marks in the final code
+    # ESCAPED_STRING keeps its quotation marks, which the output needs.
     def string(self, items):
-        val = str(items[0])
-
-        # If for some reason the quotes were stripped, we force them back on
-        if not val.startswith('"'):
-            val = f'"{val}"'
-
-        return val
+        return str(items[0])
 
     def country_tag(self, items):
         return ("COUNTRY_TAG", str(items[0])[1:]) # e.g. ("COUNTRY_TAG", "USA")
@@ -57,10 +51,4 @@ class ValuesMixin:
                 raise ValueError(
                     f"abs() takes exactly 1 argument, got {len(args)}: "
                     f"'abs({', '.join(self._expr_to_str(a) for a in args)})'")
-            # abs(x) is pure sugar for sqrt(x ** 2): |x| = sqrt(x^2). Rewriting
-            # here reuses the sqrt codegen exactly, no downstream changes.
-            # (Relies on the engine's pow/root approximation, so not bit-exact,
-            # but abs is only used where small rounding is irrelevant.)
-            squared = ("MATH", "**", args[0], 2)
-            return ("MATHFN", "sqrt", [squared])
         return ("MATHFN", name, args)

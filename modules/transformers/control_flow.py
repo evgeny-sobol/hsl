@@ -15,17 +15,21 @@ class ControlFlowMixin:
 
         return ("ASSIGN", "if", "=", ("BLOCK", new_block_items, scope_var))
 
-    # `while cond:` -> while_loop_effect. Identical shape to if_statement: the
-    # condition becomes a limit block, the body follows it.
+    # `while cond:` -> while_loop_effect. Same shape as if_statement (the
+    # condition becomes a limit block, the body follows it), plus `break`
+    # support like the for-loops.
     def while_statement(self, items):
         condition = items[0]
         block_ast = items[-1]
 
         limit_block = ("ASSIGN", "limit", "=", ("BLOCK", self.unwrap_top_and(condition)))
-        original_commands = block_ast[1]
+        body_items, break_flag = self._resolve_breaks(list(block_ast[1]))
         scope_var = block_ast[2] if len(block_ast) > 2 else None
 
-        new_block_items = [limit_block] + original_commands
+        new_block_items = [limit_block]
+        if break_flag is not None:
+            new_block_items.append(("ASSIGN", "break", "=", break_flag))
+        new_block_items += body_items
 
         return ("ASSIGN", "while_loop_effect", "=", ("BLOCK", new_block_items, scope_var))
 
@@ -97,5 +101,5 @@ class ControlFlowMixin:
 
     def else_statement(self, items):
         block_ast = items[-1]
-        # The else block does not need a limit вЂ” return the block as-is
+        # The else block does not need a limit - return the block as-is
         return ("ASSIGN", "else", "=", block_ast)

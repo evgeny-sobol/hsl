@@ -43,8 +43,10 @@ class LinqMixin:
     # into (NOT scope pointers), so no scope_var is bound вЂ” the body uses them
     # verbatim and resolve_scopes must leave them alone.
     def array_loop(self, items):
-        value = str(items[0])
+        value = self._check_var_name(str(items[0]))
         index = str(items[1])
+        if index != "_":
+            self._check_var_name(index)
         array = str(items[2])
         block_ast = items[3]
 
@@ -65,7 +67,7 @@ class LinqMixin:
 
         return ("ASSIGN", "for_each_loop", "=", ("BLOCK", new_block_items, None))
 
-    # Numeric iteration: for _x in range(end) / range(start, end) /
+    # Numeric iteration: for x in range(end) / range(start, end) /
     # range(start, end, step)  ->  for_loop_effect.
     # Like array_loop, the loop variable is an ordinary (temp) variable the
     # engine writes each iteration into, NOT a scope pointer, so scope_var stays
@@ -73,7 +75,7 @@ class LinqMixin:
     # HoI4 defaults: start = 0, add = 1, so those lines are emitted only when the
     # user supplied them. `end` is exclusive, matching Python's range().
     def range_loop(self, items):
-        var = str(items[0])
+        var = self._check_var_name(str(items[0]))
         # items[1] is the RANGE_KW token ("range"); args sit between it and the block.
         args = list(items[2:-1])
         block_ast = items[-1]

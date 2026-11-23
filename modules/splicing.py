@@ -3,12 +3,10 @@ flat-abort normalization, reindentation, injection, and EOF brace balancing.
 """
 import re
 from modules.paradox_text import (
-    _skip_string, _skip_comment, _match_closing_brace, _is_word_char,
+    _skip_string, _skip_comment, _match_closing_brace,
     _iter_named_blocks, _iter_top_level_blocks, _in_comment_or_string,
     _SL_TOKEN,
 )
-
-_WS = " \t\r\n"
 
 
 def _reflow_single_line_body(inner, base_indent):
@@ -41,18 +39,10 @@ def _reflow_single_line_body(inner, base_indent):
     return '\n'.join(lines)
 
 
-_WS = " \t\r\n"
-
-
 def expand_single_line_blocks_multi(text, names):
     """Expand every single-line `name = { ... }` block for ALL given names in
-    ONE pass. Replaces calling expand_single_line_blocks once per name, which
-    was O(text x names) with a per-character Python scan (the profiler hot spot:
-    ~125M _is_word_char calls). A compiled regex locates `name = {` candidates
-    at C speed; comment/string false positives are filtered per match.
-
-    Behaviourally identical to applying the single-name version sequentially
-    (verified byte-for-byte over randomized inputs and edge cases).
+    ONE pass. A compiled regex locates `name = {` candidates; comment/string
+    false positives are filtered per match.
 
     Nested same-line blocks (`outer = { name = { ... } }`) are left alone:
     expanding them would steal the parent's `{` into the indent and unbalance
@@ -100,57 +90,39 @@ def expand_single_line_blocks_multi(text, names):
     return "".join(out)
 
 
-def expand_single_line_blocks(text, name):
-    out = []
+def _count_top_level_stmts(inner):
+    """Count top-level statements (`key = value` / `key = { ... }`) in a trigger
+    block body, ignoring comments, strings, and nested braces."""
+    count = 0
+    depth = 0
     i = 0
-    n = len(text)
-    nlen = len(name)
+    n = len(inner)
     while i < n:
-        c = text[i]
+        c = inner[i]
         if c == '#':
-            j = _skip_comment(text, i)
-            out.append(text[i:j]); i = j; continue
+            i = _skip_comment(inner, i)
+            continue
         if c == '"':
-            j = _skip_string(text, i)
-            out.append(text[i:j]); i = j; continue
-        if not _is_word_char(text, i - 1) \
-                and text.startswith(name, i) \
-                and not _is_word_char(text, i + nlen):
-            j = i + nlen
-            k = j
-            while k < n and text[k] in ' \t\r\n':
-                k += 1
-            if k < n and text[k] == '=':
-                k += 1
-                while k < n and text[k] in ' \t\r\n':
-                    k += 1
-                if k < n and text[k] == '{':
-                    line_start = text.rfind('\n', 0, i) + 1
-                    if '{' in text[line_start:i]:
-                        out.append(text[i:j]); i = j; continue
-                    open_pos = k + 1
-                    close_pos = _match_closing_brace(text, open_pos)
-                    block_text = text[open_pos:close_pos]
-                    if '\n' not in block_text:
-                        base_indent = text[line_start:i]
-                        body = _reflow_single_line_body(block_text.strip(), base_indent)
-                        if body is not None:
-                            out.append(f"{name} = {{\n{body}\n{base_indent}}}")
-                        else:
-                            out.append(f"{name} = {{\n{base_indent}}}")
-                        i = close_pos + 1
-                        continue
-            out.append(text[i:j]); i = j; continue
-        out.append(c); i += 1
-    return ''.join(out)
+            i = _skip_string(inner, i)
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        elif c == '=' and depth == 0:
+            count += 1
+        i += 1
+    return count
 
 
 def _normalize_flat_aborts(text):
     """Wrap any flat `abort = { ... }` (a top-level plan block whose abort has no
     direct OR child) into `abort = { OR = { ... } }`, so an include that
-    navigates abort:/OR: can add a branch. OR-form and missing aborts are left
-    as-is. Operates on an in-memory copy only. Applied bottom-up so offsets stay
-    valid."""
+    navigates abort:/OR: can add a branch. When the flat abort has 2+ direct
+    conditions, wrap them in `AND = { ... }` inside `OR = { ... }` so the
+    vanilla implicit-AND semantics are preserved. OR-form and missing aborts
+    are left as-is. Operates on an in-memory copy only. Applied bottom-up so
+    offsets stay valid."""
     edits = []
     for name, o, c in _iter_top_level_blocks(text):
         ablocks = list(_iter_named_blocks(text, "abort", o, c))
@@ -164,11 +136,21 @@ def _normalize_flat_aborts(text):
         line_start = text.rfind("\n", 0, astart) + 1
         base = text[line_start:astart]
         inner_lines = inner.strip("\n").split("\n")
-        wrapped = "\n".join(
-            (base + "\t\t" + l.strip()) if l.strip() else ""
-            for l in inner_lines
-        ).strip("\n")
-        replacement = f"abort = {{\n{base}\tOR = {{\n{wrapped}\n{base}\t}}\n{base}}}"
+        if _count_top_level_stmts(inner) >= 2:
+            wrapped = "\n".join(
+                (base + "\t\t\t" + l.strip()) if l.strip() else ""
+                for l in inner_lines
+            ).strip("\n")
+            replacement = (
+                f"abort = {{\n{base}\tOR = {{\n{base}\t\tAND = {{\n"
+                f"{wrapped}\n{base}\t\t}}\n{base}\t}}\n{base}}}"
+            )
+        else:
+            wrapped = "\n".join(
+                (base + "\t\t" + l.strip()) if l.strip() else ""
+                for l in inner_lines
+            ).strip("\n")
+            replacement = f"abort = {{\n{base}\tOR = {{\n{wrapped}\n{base}\t}}\n{base}}}"
         edits.append((astart, ac + 1, replacement))
     for s, e, r in sorted(edits, key=lambda t: t[0], reverse=True):
         text = text[:s] + r + text[e:]
@@ -193,15 +175,12 @@ def splice_injections(text, injections):
 
     `payload_text` is the already-reindented block of lines to insert
     immediately before `insert_pos` (the closing brace). Applied from the
-    bottom up so earlier offsets stay valid.
+    bottom up so earlier offsets stay valid. Text is '\\n'-only: files are read
+    in text mode, which normalizes CRLF.
     """
-    # Detect dominant newline style of the host file.
-    newline = '\r\n' if text.count('\r\n') >= text.count('\n') - text.count('\r\n') else '\n'
-
     for insert_pos, payload in sorted(injections, key=lambda t: t[0], reverse=True):
-        block = payload.replace('\r\n', '\n').replace('\n', newline)
         # Ensure the injected content sits on its own line(s) ending before '}'.
-        chunk = block.rstrip('\n').rstrip('\r') + newline
+        chunk = payload.rstrip('\n') + '\n'
         text = text[:insert_pos] + chunk + text[insert_pos:]
     return text
 

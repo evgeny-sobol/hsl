@@ -25,7 +25,6 @@ start: (_NL | item)*
      | scoped_macro_call _NL
      | scoped_chain      _NL
      | scoped_block
-     | rand_call         _NL
      | prefixed_scoped_call _NL
      | assignment       _NL
      | array_rand_assign _NL
@@ -98,7 +97,7 @@ condition:     conj_element (OR_OP conj_element)*
 
 # Statement-level negation: `not <trigger>` as a standalone line (e.g. inside
 # a macro body). Reuses cond_atom + the logical_not handler, so it expands to
-# the same NOT = { ... } block that `NOT::trigger()` produced.
+# the same NOT = { ... } block that `not trigger()` inside a condition produces.
 not_statement: NOT_OP cond_atom -> logical_not
 
 # Python-style no-op. Produces nothing; it exists so an indentation block
@@ -142,15 +141,15 @@ scoped_macro_call: scope_head ARROW macro_call
 # Needs >=2 arrows so it doesn't collide with single-arrow scoped_func_call.
 scoped_chain: scope_head ARROW UNQUOTED_VALUE (ARROW UNQUOTED_VALUE)+ "(" [value] ")"
 
-# `scope::func:` opening a block (vs scoped_func_call's `scope::func(arg)`).
+# `scope->func:` opening a block (vs scoped_func_call's `scope->func(arg)`).
 # For engine scope-transitions that take a trigger/effect block rather than a
-# single argument, e.g. THIS::any_controlled_state: -> THIS = { any_controlled_state = { ... } }
+# single argument, e.g. THIS->any_controlled_state: -> THIS = { any_controlled_state = { ... } }
 scoped_block: scope_head ARROW UNQUOTED_VALUE block
 
 # One-line form of a prefixed scope + trigger:
-#   var:NAME[i]::func(arg)  ->  var:NAME^i = { func = arg }
-#   var:NAME::func(arg)     ->  var:NAME   = { func = arg }
-# The '::' separator mirrors scoped_func_call; the left side is a PREFIXED_REF
+#   var:NAME[i]->func(arg)  ->  var:NAME^i = { func = arg }
+#   var:NAME->func(arg)     ->  var:NAME   = { func = arg }
+# The '->' separator mirrors scoped_func_call; the left side is a PREFIXED_REF
 # with an optional [index].
 prefixed_scoped_call: PREFIXED_REF ("[" value "]")? ARROW UNQUOTED_VALUE "(" [value] ")"
 
@@ -182,7 +181,7 @@ loop_binding: UNQUOTED_VALUE "in"
 # Distinct from the scope loops above by the ',' after the first variable.
 array_loop.2: "for" UNQUOTED_VALUE "," UNQUOTED_VALUE "in" UNQUOTED_VALUE "[]" block
 
-# Numeric iteration: `for _x in range(end):` -> for_loop_effect.
+# Numeric iteration: `for x in range(end):` -> for_loop_effect.
 # range(end) / range(start, end) / range(start, end, step). Distinct from the
 # scope loops by the RANGE_KW terminal, and from array_loop by the absence of a
 # ',' before "in". Priority .3 so `range(` is not taken as a bare scope call.
@@ -258,13 +257,13 @@ bracket_list: UNQUOTED_VALUE "[" value ("," value)+ "]"
 # happens in the transformer.
 math_func: MATH_FUNC_NAME "(" arith_expr ("," arith_expr)* ")"
 
-# Random-value builtins (statement-level effects, not value expressions):
-#   rand(var)            /  var = rand()
-#   randf(var, min, max) /  var = randf(min, max)   (float, max as-is)
-#   randi(var, min, max) /  var = randi(min, max)   (int, max+1 -> inclusive)
-# The `var = rand*(...)` form is sugar: the compiler moves the LHS into the
-# first argument, so both forms produce identical output (no extra temp).
-# temp vs persistent is chosen from var's '_' prefix.
+# Random-value builtins (assignment-RHS only, not value expressions):
+#   var = rand()
+#   var = randf(min, max)   (float, max as-is)
+#   var = randi(min, max)   (int, max+1 -> inclusive)
+# rand_assign moves the LHS into the first argument of rand_call so codegen
+# stays in one place (no extra temp).
+# Temp by default, persistent with a leading '&' on var.
 rand_call: RAND_FUNC_NAME "(" (value ("," value ("," value)?)?)? ")"
 rand_assign: value EQUAL_OP rand_call
 
@@ -375,8 +374,11 @@ AMP_OP:                "&"
 # TERMINALS вЂ” VALUES & NAMES
 # =============================================================================
 
-# Digits with optional single underscores as separators (e.g. 1_000_000)
-UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /[a-zA-Z0-9_\.@&]+(\{[a-zA-Z0-9_]+\}[a-zA-Z0-9_\.@&]*)*/
+# Digits with optional single underscores as separators (e.g. 1_000_000).
+# The persistent marker '&' may only start a name or a dotted segment
+# (`&x`, `GER.&x`), so `x&y` lexes as `x & y` instead of one name. The
+# lookbehind stops `&y` in `x&y` from lexing as a persistent name.
+UNQUOTED_VALUE: /-?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?/ | /(?:(?<![A-Za-z0-9_@.])&)?(?:[a-zA-Z0-9_@]|\.&?)+(\{[a-zA-Z0-9_]+\}(?:[a-zA-Z0-9_@]|\.&?)*)*/
 COUNTRY_TAG:    "$" /[A-Z0-9_]+/
 MACRO_NAME.2:   "$" /[a-z][a-zA-Z0-9_]*/
 COMMENT:        /#[^\n]*/

@@ -78,12 +78,6 @@ class BlocksMixin:
             name = ref
         return ("ASSIGN", name, "=", block_ast)
 
-    # Unwrap a COUNTRY_TAG sentinel to its bare tag; pass anything else through.
-    def _unwrap_tag(self, v):
-        if isinstance(v, tuple) and v and v[0] == "COUNTRY_TAG":
-            return v[1]
-        return v
-
     # Raw block: `raw name: { ... }`  ->  name = { <verbatim lines> }
     # items[0] is the RAW_KW marker token; the name follows it.
     def raw_block(self, items):

@@ -76,8 +76,8 @@ class FunctionsMixin:
                     f"'{func_name}(...)': '{func_name}({self._expr_to_str(arg)})'. "
                     f"HoI4 rejects an inline value-block here. Assign it to a "
                     f"(temp) variable first, e.g.:\n"
-                    f"    _tmp <- {self._expr_to_str(arg)}\n"
-                    f"    {func_name}(_tmp)"
+                    f"    tmp = {self._expr_to_str(arg)}\n"
+                    f"    {func_name}(tmp)"
                 )
 
             # Unwrap a COUNTRY_TAG sentinel to its bare tag.
@@ -97,11 +97,11 @@ class FunctionsMixin:
             # If parentheses are empty, default to standard HoI4 trigger behavior ("= yes")
             return ("ASSIGN", func_name, "=", "yes")
 
-    # rand(var) / randf(var,min,max) / randi(var,min,max) -> engine random
-    # effects. Also usable as `var = rand*(...)` (see rand_assign), which the
-    # compiler rewrites to this same form with no extra temp.
+    # var = rand() / var = randf(min, max) / var = randi(min, max) -> engine
+    # random effects. rand_assign forwards the LHS as the first arg to rand_call
+    # so codegen stays in one place with no extra temp.
     #
-    # temp vs persistent is chosen from var's '_' prefix. The engine range is
+    # temp by default, persistent with a leading '&'. The engine range is
     # [min, max); randi makes max INCLUSIVE via max+1 (compile-time for an int
     # literal, else a one-command accumulator temp). randf leaves max as-is.
     # The random block and any max-temp are emitted on one line (RAW_INLINE).
@@ -130,7 +130,7 @@ class FunctionsMixin:
         if fname == "rand":
             if len(args) != 1:
                 raise ValueError(f"rand() takes exactly 1 argument, got {len(args)}")
-            cmd = "set_temp_variable_to_random" if self._is_temp_ref(var) else "set_variable_to_random"
+            cmd = "set_temp_variable_to_random" if self._var_is_temp(var) else "set_variable_to_random"
             return ("ASSIGN", cmd, "=", self._strip_persist(var))
 
         if len(args) != 3:
@@ -144,7 +144,7 @@ class FunctionsMixin:
                 raise ValueError(
                     f"{fname}(): {role} cannot be an arithmetic expression; "
                     f"assign it to a variable first, then pass that variable.")
-        cmd = "set_temp_variable_to_random" if self._is_temp_ref(var) else "set_variable_to_random"
+        cmd = "set_temp_variable_to_random" if self._var_is_temp(var) else "set_variable_to_random"
         var = self._strip_persist(var)
 
         pre = []
@@ -172,10 +172,6 @@ class FunctionsMixin:
             parts.append("integer=yes")
         call = ("RAW_INLINE", cmd, " ".join(parts))
         return pre + [call] if pre else call
-
-    def _is_temp_ref(self, name):
-        # temp by default; '&' marks persistent. Delegates to the shared helper.
-        return self._var_is_temp(name)
 
     def _inline_accumulator(self, items):
         # Render a list of ("ASSIGN", key, "=", value) accumulator steps as a
@@ -219,10 +215,10 @@ class FunctionsMixin:
         if self._is_expr(arg):
             raise ValueError(
                 f"Arithmetic expression cannot be passed directly to "
-                f"'{scope}::{func}(...)'. HoI4 rejects an inline value-block "
+                f"'{scope}->{func}(...)'. HoI4 rejects an inline value-block "
                 f"here. Assign it to a (temp) variable first, e.g.:\n"
-                f"    _tmp <- {self._expr_to_str(arg)}\n"
-                f"    {scope}::{func}(_tmp)"
+                f"    tmp = {self._expr_to_str(arg)}\n"
+                f"    {scope}->{func}(tmp)"
             )
 
         # Preserve non-string args (int / ("ARITH", ...) marker); default the
@@ -268,10 +264,10 @@ class FunctionsMixin:
         if self._is_expr(arg):
             raise ValueError(
                 f"Arithmetic expression cannot be passed directly to "
-                f"'{name}::{func}(...)'. HoI4 rejects an inline value-block "
+                f"'{name}->{func}(...)'. HoI4 rejects an inline value-block "
                 f"here. Assign it to a (temp) variable first, e.g.:\n"
-                f"    _tmp <- {self._expr_to_str(arg)}\n"
-                f"    {name}::{func}(_tmp)"
+                f"    tmp = {self._expr_to_str(arg)}\n"
+                f"    {name}->{func}(tmp)"
             )
 
         inner_val = "yes" if arg is None else arg

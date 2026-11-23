@@ -58,11 +58,6 @@ def _read_direct_scalar(text, open_pos, close_pos, key):
     return None
 
 
-def _values_equal(a, b):
-    """Compare two HoI4 scalar values, ignoring surrounding quotes."""
-    return a.strip().strip('"') == b.strip().strip('"')
-
-
 def _norm_value(v):
     return v.strip().strip('"')
 

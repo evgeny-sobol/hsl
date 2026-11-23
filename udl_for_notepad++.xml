@@ -14,7 +14,7 @@
             <Keywords name="Numbers, suffix1">, : ]</Keywords>
             <Keywords name="Numbers, suffix2" />
             <Keywords name="Numbers, range">_</Keywords>
-            <Keywords name="Operators1">= + - * / &lt; &gt; %</Keywords>
+            <Keywords name="Operators1">= + - * / &lt; &gt; % -&gt; ! |</Keywords>
             <Keywords name="Operators2" />
             <Keywords name="Folders in code1, open" />
             <Keywords name="Folders in code1, middle" />
@@ -29,6 +29,7 @@
 OR: OR or: or |
 NOT: NOT not: not
 if elif else:
+while
 match case
 for in break
 null null:
